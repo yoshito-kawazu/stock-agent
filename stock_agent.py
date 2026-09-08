@@ -103,7 +103,8 @@ def analyze_and_plot(ticker, idx):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    ratio_list =
+    # 上段と下段の高さ比率
+    ratio_list = (3, 1)
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), gridspec_kw=dict(height_ratios=ratio_list), sharex=True)
 
     ax1.plot(df.index, df['Close'], label="Close", color="black", alpha=0.7)
