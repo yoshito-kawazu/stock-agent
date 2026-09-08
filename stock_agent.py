@@ -31,21 +31,37 @@ MACRO_CALENDAR = """
 | 10/02 (金) 21:30 | 🇺🇸 米国 | 米9月 雇用統計 | ★★★ (大) | 労働市場の減速ペース |
 """
 
-def get_target_ticker():
+def get_target_tickers():
     try:
         url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv"
-        df = pd.read_csv(url)
-        ticker = str(df.columns[0]).strip()
-        return ticker if ".T" in ticker else f"{ticker}.T"
+        df = pd.read_csv(url, header=None)
+        
+        raw_items = []
+        for val in df.values.flatten():
+            if pd.notna(val):
+                for item in str(val).split(","):
+                    item_clean = item.strip()
+                    if item_clean:
+                        raw_items.append(item_clean)
+        
+        tickers = []
+        for t in raw_items:
+            t_formatted = t if ".T" in t else f"{t}.T"
+            if t_formatted not in tickers:
+                tickers.append(t_formatted)
+        
+        print(f"取得した監視銘柄: {tickers}")
+        return tickers if tickers else ["7003.T", "6525.T"]
     except Exception as e:
-        print(f"スプレッドシート読込警告: {e} ➜ デフォルト 7003.T を使用")
-        return "7003.T"
+        print(f"スプレッドシート読込警告: {e} ➜ デフォルト 7003.T, 6525.T を使用")
+        return ["7003.T", "6525.T"]
 
-def generate_chart(ticker):
+def analyze_and_plot(ticker, idx):
+    print(f"[{ticker}] チャート生成 ＆ 分析中...")
     stock = yf.Ticker(ticker)
     df = stock.history(period="6mo")
     if df.empty:
-        raise ValueError(f"{ticker} のデータが取得できませんでした。")
+        return None, f"・`{ticker}`: データ取得エラー\n"
 
     df['SMA25'] = df['Close'].rolling(window=25).mean()
     df['SMA75'] = df['Close'].rolling(window=75).mean()
@@ -64,8 +80,8 @@ def generate_chart(ticker):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    # 修正箇所: [3, 1] を指定
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
+    # チャート描画
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
 
     ax1.plot(df.index, df['Close'], label="Close Price", color="black", alpha=0.7)
     ax1.plot(df.index, df['SMA25'], label="25 SMA", color="blue", linewidth=1.2)
@@ -73,7 +89,7 @@ def generate_chart(ticker):
     ax1.axhline(recent_high, color="red", linestyle="--", alpha=0.8, label=f"Resistance: ¥{recent_high:.0f}")
     ax1.axhline(recent_low, color="green", linestyle="--", alpha=0.8, label=f"Support: ¥{recent_low:.0f}")
     ax1.plot(df.index[-30:], trend_line, color="purple", linestyle=":", linewidth=1.5, label="Trend Line")
-    ax1.set_title(f"{ticker} Technical Chart & Trends", fontsize=14, fontweight="bold")
+    ax1.set_title(f"{ticker} Technical Chart & Trends", fontsize=13, fontweight="bold")
     ax1.legend(loc="upper left")
     ax1.grid(True, alpha=0.3)
 
@@ -85,10 +101,28 @@ def generate_chart(ticker):
     ax2.grid(True, alpha=0.3)
 
     plt.tight_layout()
-    chart_path = "technical_chart.png"
-    plt.savefig(chart_path, dpi=120)
+    chart_path = f"chart_{idx}.png"
+    plt.savefig(chart_path, dpi=110)
     plt.close()
-    return chart_path, recent_high, recent_low, df
+
+    curr_price = df['Close'].iloc[-1]
+    prev_price = df['Close'].iloc[-2] if len(df) > 1 else curr_price
+    pct = ((curr_price - prev_price) / prev_price) * 100
+    day_high = df['High'].iloc[-1]
+    day_low = df['Low'].iloc[-1]
+    
+    macd_val = df['MACD'].iloc[-1]
+    sig_val = df['Signal'].iloc[-1]
+    macd_status = "ゴールデンクロス圏（買い優勢）" if macd_val > sig_val else "デッドクロス圏（調整警戒）"
+
+    text = f"""▼ **{ticker}**
+・**現在値**: ¥{curr_price:.1f} (前日比: `{pct:+.2f}%`)
+・**当日レンジ**: 安値 ¥{day_low:.1f} 〜 高値 ¥{day_high:.1f}
+・**移動平均線**: 25日線 ¥{df['SMA25'].iloc[-1]:.1f} / 75日線 ¥{df['SMA75'].iloc[-1]:.1f}
+・🔴 **レジスタンス**: ¥{recent_high:.0f} / 🟢 **サポート**: ¥{recent_low:.0f}
+・📊 **MACD**: {macd_status} (MACD: {macd_val:.2f} / Signal: {sig_val:.2f})
+"""
+    return chart_path, text
 
 def fetch_macro():
     res = []
@@ -114,30 +148,24 @@ def fetch_macro():
     return pd.DataFrame(res).to_markdown(index=False)
 
 def main():
-    ticker = get_target_ticker()
-    chart_path, r_high, r_low, df = generate_chart(ticker)
+    tickers = get_target_tickers()
     
-    curr_price = df['Close'].iloc[-1]
-    prev_price = df['Close'].iloc[-2] if len(df) > 1 else curr_price
-    pct = ((curr_price - prev_price) / prev_price) * 100
-    day_high = df['High'].iloc[-1]
-    day_low = df['Low'].iloc[-1]
+    stock_texts = []
+    chart_files = []
     
+    for i, t in enumerate(tickers):
+        chart_path, text = analyze_and_plot(t, i)
+        stock_texts.append(text)
+        if chart_path:
+            chart_files.append((f"file{i}", (os.path.basename(chart_path), open(chart_path, "rb"), "image/png")))
+
     macro_table = fetch_macro()
-    macd_val = df['MACD'].iloc[-1]
-    sig_val = df['Signal'].iloc[-1]
-    macd_status = "ゴールデンクロス圏（買い優勢）" if macd_val > sig_val else "デッドクロス圏（調整警戒）"
+    stock_summary = "\n".join(stock_texts)
 
     report_text = f"""## 📅 【相場 ＆ テクニカル分析レポート】
 
-### ■ 1. 注目銘柄：`{ticker}`
-・**現在値**: ¥{curr_price:.1f} (前日比: `{pct:+.2f}%`)
-・**当日レンジ**: 安値 ¥{day_low:.1f} 〜 高値 ¥{day_high:.1f}
-・**移動平均線**: 25日線 ¥{df['SMA25'].iloc[-1]:.1f} / 75日線 ¥{df['SMA75'].iloc[-1]:.1f}
-・🔴 **レジスタンス（売り場目安）**: ¥{r_high:.0f}
-・🟢 **サポート（押し目目安）**: ¥{r_low:.0f}
-・📊 **MACD状況**: {macd_status} (MACD: {macd_val:.2f} / Signal: {sig_val:.2f})
-
+### ■ 1. 注目個別銘柄サマリー
+{stock_summary}
 ---
 
 ### ■ 2. 主要マクロ指標 ＆ 先物一覧
@@ -149,13 +177,14 @@ def main():
 {MACRO_CALENDAR}
 """
 
-    with open(chart_path, "rb") as f:
-        res = requests.post(
-            DISCORD_WEBHOOK_URL,
-            data={"content": report_text},
-            files={"file": ("chart.png", f, "image/png")}
-        )
-    print(f"Discord送信完了: ステータスコード {res.status_code}")
+    # Discordへテキストと複数画像を送信
+    res = requests.post(
+        DISCORD_WEBHOOK_URL,
+        data={"content": report_text},
+        files=chart_files
+    )
+    print(f"Discord一括送信完了: ステータス {res.status_code}")
 
 if __name__ == "__main__":
     main()
+
