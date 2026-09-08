@@ -1,14 +1,17 @@
 import os
+import sys
 import yfinance as yf
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import requests
-import google.generativeai as genai
 
 SPREADSHEET_ID = os.environ.get("SPREADSHEET_ID")
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
+if not SPREADSHEET_ID or not DISCORD_WEBHOOK_URL:
+    print("【エラー】SPREADSHEET_ID または DISCORD_WEBHOOK_URL が設定されていません。")
+    sys.exit(1)
 
 MACRO_SYMBOLS = {
     "USD/JPY": "USDJPY=X",
@@ -30,15 +33,21 @@ MACRO_CALENDAR = """
 """
 
 def get_target_ticker():
-    url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/gviz/tq?tqx=out:csv"
-    df = pd.read_csv(url)
-    ticker = str(df.columns[0]).strip()
-    return ticker if ".T" in ticker else f"{ticker}.T"
+    try:
+        url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv"
+        df = pd.read_csv(url)
+        ticker = str(df.columns[0]).strip()
+        return ticker if ".T" in ticker else f"{ticker}.T"
+    except Exception as e:
+        print(f"スプレッドシート読込警告: {e} ➜ デフォルト 7003.T を使用")
+        return "7003.T"
 
 def generate_chart(ticker):
     stock = yf.Ticker(ticker)
     df = stock.history(period="6mo")
-    
+    if df.empty:
+        raise ValueError(f"{ticker} のデータが取得できませんでした。")
+
     df['SMA25'] = df['Close'].rolling(window=25).mean()
     df['SMA75'] = df['Close'].rolling(window=75).mean()
 
@@ -56,7 +65,7 @@ def generate_chart(ticker):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios':}, sharex=True)
 
     ax1.plot(df.index, df['Close'], label="Close Price", color="black", alpha=0.7)
     ax1.plot(df.index, df['SMA25'], label="25 SMA", color="blue", linewidth=1.2)
@@ -109,47 +118,44 @@ def main():
     chart_path, r_high, r_low, df = generate_chart(ticker)
     
     curr_price = df['Close'].iloc[-1]
-    prev_price = df['Close'].iloc[-2]
+    prev_price = df['Close'].iloc[-2] if len(df) > 1 else curr_price
     pct = ((curr_price - prev_price) / prev_price) * 100
     day_high = df['High'].iloc[-1]
     day_low = df['Low'].iloc[-1]
     
     macro_table = fetch_macro()
+    macd_val = df['MACD'].iloc[-1]
+    sig_val = df['Signal'].iloc[-1]
+    macd_status = "ゴールデンクロス圏（買い優勢）" if macd_val > sig_val else "デッドクロス圏（調整警戒）"
 
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel('gemini-1.5-flash')
-    
-    prompt = f"""
-以下の市場データをもとに、毎時更新の投資家向けレポートを作成してください。
+    report_text = f"""## 📅 【相場 ＆ テクニカル分析レポート】
 
-【個別銘柄 ({ticker})】
-・現在値: ¥{curr_price:.1f} (前日比: {pct:+.2f}%)
-・当日レンジ: 安値 ¥{day_low:.1f} 〜 高値 ¥{day_high:.1f}
-・25日移動平均線: ¥{df['SMA25'].iloc[-1]:.1f}, 75日線: ¥{df['SMA75'].iloc[-1]:.1f}
-・レジスタンスライン（売り場目安）: ¥{r_high:.0f}
-・サポートライン（押し目目安）: ¥{r_low:.0f}
-・MACD: {df['MACD'].iloc[-1]:.2f}, シグナル: {df['Signal'].iloc[-1]:.2f}
+### ■ 1. 注目銘柄：`{ticker}`
+・**現在値**: ¥{curr_price:.1f} (前日比: `{pct:+.2f}%`)
+・**当日レンジ**: 安値 ¥{day_low:.1f} 〜 高値 ¥{day_high:.1f}
+・**移動平均線**: 25日線 ¥{df['SMA25'].iloc[-1]:.1f} / 75日線 ¥{df['SMA75'].iloc[-1]:.1f}
+・🔴 **レジスタンス（売り場目安）**: ¥{r_high:.0f}
+・🟢 **サポート（押し目目安）**: ¥{r_low:.0f}
+・📊 **MACD状況**: {macd_status} (MACD: {macd_val:.2f} / Signal: {sig_val:.2f})
 
-【主要マクロ指標・先物一覧】
+---
+
+### ■ 2. 主要マクロ指標 ＆ 先物一覧
 {macro_table}
 
-【今後1か月のマクロイベント】
-{MACRO_CALENDAR}
+---
 
-■ 作成ルール:
-1. 冒頭に個別銘柄の株価・前日比・高安値およびサポート/レジスタンス価格を整理。
-2. MACDやトレンドラインの状況を含めたテクニカル所見を記載。
-3. マクロ指標一覧表と、重要度（★★★/★★☆/★☆☆）付きマクロイベントカレンダーを掲載。
-4. Discordで見やすいMarkdown形式で出力してください。
+### ■ 3. 今後1か月の主要マクロイベントカレンダー
+{MACRO_CALENDAR}
 """
-    response = model.generate_content(prompt)
 
     with open(chart_path, "rb") as f:
-        requests.post(
+        res = requests.post(
             DISCORD_WEBHOOK_URL,
-            data={"content": response.text},
+            data={"content": report_text},
             files={"file": ("chart.png", f, "image/png")}
         )
+    print(f"送信完了: ステータスコード {res.status_code}")
 
 if __name__ == "__main__":
     main()
