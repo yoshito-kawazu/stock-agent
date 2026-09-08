@@ -90,8 +90,9 @@ def analyze_and_plot(ticker, idx):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    # 修正箇所: gridspec_kw={'height_ratios':}
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), gridspec_kw={'height_ratios':}, sharex=True)
+    # グラフの高さ比率（上段:下段 = 3:1）
+    ratio_list = [3, 1]
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), gridspec_kw=dict(height_ratios=ratio_list), sharex=True)
 
     ax1.plot(df.index, df['Close'], label="Close", color="black", alpha=0.7)
     ax1.plot(df.index, df['SMA25'], label="25 SMA", color="blue", linewidth=1.2)
@@ -167,42 +168,4 @@ def main():
         chart_path, text = analyze_and_plot(t, i)
         stock_texts.append(text)
         if chart_path and os.path.exists(chart_path):
-            files[f"files[{i}]"] = (os.path.basename(chart_path), open(chart_path, "rb"), "image/png")
-
-    macro_table = fetch_macro()
-    stock_summary = "\n".join(stock_texts)
-
-    report_text = f"""## 📅 【相場 ＆ テクニカル分析レポート】
-
-### ■ 1. 注目個別銘柄サマリー
-{stock_summary}
----
-
-### ■ 2. 主要マクロ指標 ＆ 先物一覧
-{macro_table}
-
----
-
-### ■ 3. 今後1か月の主要マクロイベントカレンダー
-{MACRO_CALENDAR}
-"""
-    if len(report_text) > 1950:
-        report_text = report_text[:1950] + "\n..."
-
-    payload = {
-        "payload_json": json.dumps({"content": report_text})
-    }
-
-    print("Discordへ送信中...")
-    res = requests.post(
-        DISCORD_WEBHOOK_URL,
-        data=payload,
-        files=files
-    )
-    print(f"Discord送信ステータス: {res.status_code}")
-    if res.status_code not in [200, 204]:
-        print(f"エラー詳細: {res.text}")
-        sys.exit(1)
-
-if __name__ == "__main__":
-    main()
+            
