@@ -19,19 +19,6 @@ if not SPREADSHEET_ID or not DISCORD_WEBHOOK_URL:
     print("【エラー】SPREADSHEET_ID または DISCORD_WEBHOOK_URL が設定されていません。")
     sys.exit(1)
 
-COMPANY_NAMES = {
-    "7003.T": "三井E&S",
-    "6525.T": "KOKUSAI ELECTRIC",
-    "6855.T": "日本電子材料",
-    "8035.T": "東京エレクトロン",
-    "6920.T": "レーザーテック",
-    "9984.T": "ソフトバンクG",
-    "6758.T": "ソニーグループ",
-    "7203.T": "トヨタ自動車",
-    "NK=F": "日経225先物",
-    "^N225": "日経平均株価",
-}
-
 MACRO_DEFINITIONS = [
     {"name": "日経平均先物 (大証/CME)", "symbols": ["NK=F", "NIY=F", "NKD=F", "^N225"], "is_yield": False},
     {"name": "Nasdaq100先物 (CME)", "symbols": ["NQ=F", "^IXIC"], "is_yield": False},
@@ -61,8 +48,6 @@ def generate_dynamic_calendar():
     end_date = now_jst + timedelta(days=32)
 
     events = []
-
-    # 今月と来月の2か月分のスケジュールを動的計算
     months_to_check = [
         (now_jst.year, now_jst.month),
         ((now_jst.year + 1 if now_jst.month == 12 else now_jst.year), (1 if now_jst.month == 12 else now_jst.month + 1))
@@ -169,12 +154,6 @@ def generate_dynamic_calendar():
 
 def clean_and_format_ticker(raw_text):
     text = unicodedata.normalize('NFKC', str(raw_text)).strip()
-    if "三井" in text or "7003" in text:
-        return "7003.T"
-    if "KOKUSAI" in text.upper() or "コクサイ" in text or "6525" in text:
-        return "6525.T"
-    if "日本電子材料" in text or "6855" in text:
-        return "6855.T"
     if "先物" in text or "NK" in text.upper():
         return "NK=F"
     if "日経" in text:
@@ -189,6 +168,28 @@ def clean_and_format_ticker(raw_text):
     if text.startswith("^") or "=" in text or ".T" in text:
         return text
     return f"{text}.T"
+
+def get_company_name_auto(ticker):
+    # 先物・指数の場合
+    if ticker in ["NK=F", "NIY=F"]:
+        return "日経225先物"
+    if ticker == "^N225":
+        return "日経平均株価"
+    if ticker == "NQ=F":
+        return "Nasdaq100先物"
+
+    # 日本株（.T）の場合、Yahoo FinanceのAPIから会社名を自動抽出
+    try:
+        stock = yf.Ticker(ticker)
+        # 取得可能な名称属性を順にチェック
+        name = stock.info.get("shortName") or stock.info.get("longName") or ""
+        if name:
+            # 「CO., LTD.」や「株式会社」などの余計な接尾語をすっきり整理
+            name = re.sub(r'(?i)(CO\.,?\s*LTD\.?|CORP(ORATION)?\.?|INC\.?|HOLDINGS|株式会社)', '', name).strip()
+            return name
+    except Exception:
+        pass
+    return ""
 
 def get_target_tickers():
     try:
@@ -205,10 +206,10 @@ def get_target_tickers():
                         tickers.append(t)
         
         print(f"解析後の監視対象銘柄: {tickers}")
-        return tickers if tickers else ["7003.T", "6525.T"]
+        return tickers if tickers else ["7003.T", "6525.T", "7826.T"]
     except Exception as e:
-        print(f"スプレッドシート読込警告: {e} ➜ デフォルト 7003.T, 6525.T を使用")
-        return ["7003.T", "6525.T"]
+        print(f"スプレッドシート読込警告: {e} ➜ デフォルトを使用")
+        return ["7003.T", "6525.T", "7826.T"]
 
 def fetch_history_safely(ticker):
     try:
@@ -233,7 +234,8 @@ def analyze_and_plot(ticker, idx):
     print(f"[{ticker}] チャート生成 ＆ 分析中...")
     df = fetch_history_safely(ticker)
     
-    company_name = COMPANY_NAMES.get(ticker, "")
+    # 会社名を自動取得
+    company_name = get_company_name_auto(ticker)
     display_title = f"{ticker} {company_name}".strip()
 
     if df.empty or len(df) < 5:
