@@ -3,6 +3,9 @@ import sys
 import json
 import re
 import unicodedata
+import calendar
+from datetime import datetime, timedelta
+import pytz
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -16,7 +19,6 @@ if not SPREADSHEET_ID or not DISCORD_WEBHOOK_URL:
     print("【エラー】SPREADSHEET_ID または DISCORD_WEBHOOK_URL が設定されていません。")
     sys.exit(1)
 
-# 主要企業名マップ
 COMPANY_NAMES = {
     "7003.T": "三井E&S",
     "6525.T": "KOKUSAI ELECTRIC",
@@ -30,7 +32,6 @@ COMPANY_NAMES = {
     "^N225": "日経平均株価",
 }
 
-# マクロ指標 ＆ 先物一覧の定義（日本10年国債利回りを追加）
 MACRO_DEFINITIONS = [
     {"name": "日経平均先物 (大証/CME)", "symbols": ["NK=F", "NIY=F", "NKD=F", "^N225"], "is_yield": False},
     {"name": "Nasdaq100先物 (CME)", "symbols": ["NQ=F", "^IXIC"], "is_yield": False},
@@ -39,16 +40,128 @@ MACRO_DEFINITIONS = [
     {"name": "日本10年国債利回り", "symbols": ["JP10YT=XX", "^TNX"], "is_yield": True},
 ]
 
-MACRO_CALENDAR = """
-| 日程 (日本時間) | 国 / 地域 | イベント / 経済指標 | 影響度 | 注目ポイント |
-|---|---|---|---|---|
-| 09/11 (金) 21:30 | 🇺🇸 米国 | 米8月 CPI (消費者物価指数) | ★★★ (大) | インフレ鈍化の継続性 |
-| 09/18 (木) 未定  | 🇯🇵 日本 | 日銀 金融政策決定会合 | ★★★ (大) | 追加利上げスタンス |
-| 09/19 (金) 03:00 | 🇺🇸 米国 | FOMC 政策金利発表 ＆ 会見 | ★★★ (大) | 利下げ幅（25bp vs 50bp） |
-| 09/26 (金) 21:30 | 🇺🇸 米国 | 米8月 PCEデフレーター | ★★☆ (中) | FRB重視の物価指標 |
-| 10/01 (木) 08:50 | 🇯🇵 日本 | 日銀短観 (9月調査) | ★★☆ (中) | 国内企業の景況感 |
-| 10/02 (金) 21:30 | 🇺🇸 米国 | 米9月 雇用統計 | ★★★ (大) | 労働市場の減速ペース |
-"""
+# 毎月の第N金曜日を算出する関数
+def get_nth_friday(year, month, n=1):
+    c = calendar.Calendar(firstweekday=calendar.MONDAY)
+    monthcal = c.monthdatescalendar(year, month)
+    fridays = [day for week in monthcal for day in week if day.weekday() == calendar.FRIDAY and day.month == month]
+    return fridays[n-1] if len(fridays) >= n else None
+
+# 毎月の最終金曜日を算出する関数
+def get_last_friday(year, month):
+    c = calendar.Calendar(firstweekday=calendar.MONDAY)
+    monthcal = c.monthdatescalendar(year, month)
+    fridays = [day for week in monthcal for day in week if day.weekday() == calendar.FRIDAY and day.month == month]
+    return fridays[-1] if fridays else None
+
+# 動的に今後1か月の主要イベントを自動生成するエンジン
+def generate_dynamic_calendar():
+    jst = pytz.timezone('Asia/Tokyo')
+    now_jst = datetime.now(jst)
+    end_date = now_jst + timedelta(days=32)
+
+    events = []
+
+    # 今月と来月の2か月分のスケジュールを動的計算
+    months_to_check = [
+        (now_jst.year, now_jst.month),
+        ((now_jst.year + 1 if now_jst.month == 12 else now_jst.year), (1 if now_jst.month == 12 else now_jst.month + 1))
+    ]
+
+    for y, m in months_to_check:
+        # 1. 米雇用統計（第1金曜日 21:30）
+        fri1 = get_nth_friday(y, m, 1)
+        if fri1:
+            events.append({
+                "datetime": jst.localize(datetime(fri1.year, fri1.month, fri1.day, 21, 30)),
+                "country": "🇺🇸 米国",
+                "event": f"米{m-1 if m > 1 else 12}月 雇用統計",
+                "impact": "★★★ (大)",
+                "point": "非農業部門雇用者数 ＆ 失業率"
+            })
+
+        # 2. 米CPI（毎月中旬 12日前後の平日 21:30）
+        cpi_day = 12
+        while datetime(y, m, cpi_day).weekday() >= 5: # 土日回避
+            cpi_day += 1
+        events.append({
+            "datetime": jst.localize(datetime(y, m, cpi_day, 21, 30)),
+            "country": "🇺🇸 米国",
+            "event": f"米{m-1 if m > 1 else 12}月 CPI (消費者物価指数)",
+            "impact": "★★★ (大)",
+            "point": "インフレ動向・前年比"
+        })
+
+        # 3. 米PCEデフレーター（月末最終金曜日 21:30）
+        last_fri = get_last_friday(y, m)
+        if last_fri:
+            events.append({
+                "datetime": jst.localize(datetime(last_fri.year, last_fri.month, last_fri.day, 21, 30)),
+                "country": "🇺🇸 米国",
+                "event": f"米{m-1 if m > 1 else 12}月 PCEデフレーター",
+                "impact": "★★☆ (中)",
+                "point": "FRB重視の物価指標"
+            })
+
+        # 4. 日銀短観（4月・7月・10月・12月の1日頃 08:50）
+        if m in:
+            tankan_day = 1
+            while datetime(y, m, tankan_day).weekday() >= 5:
+                tankan_day += 1
+            events.append({
+                "datetime": jst.localize(datetime(y, m, tankan_day, 8, 50)),
+                "country": "🇯🇵 日本",
+                "event": f"日銀短観 ({m}月調査)",
+                "impact": "★★☆ (中)",
+                "point": "大企業製造業DI・景況感"
+            })
+
+        # 5. FOMC 政策金利（1, 3, 5, 6, 7, 9, 11, 12月の中下旬 03:00）
+        if m in:
+            fomc_day = 18 if m in else 28
+            while datetime(y, m, fomc_day).weekday() >= 5:
+                fomc_day += 1
+            events.append({
+                "datetime": jst.localize(datetime(y, m, fomc_day, 3, 0)),
+                "country": "🇺🇸 米国",
+                "event": f"FOMC 政策金利発表 ＆ 議長会見",
+                "impact": "★★★ (大)",
+                "point": "利下げ/利上げ判断 ＆ 経済見通し"
+            })
+
+        # 6. 日銀金融政策決定会合（1, 3, 4, 6, 7, 9, 10, 12月の中下旬 12:00）
+        if m in:
+            boj_day = 19 if m in else 29
+            while datetime(y, m, boj_day).weekday() >= 5:
+                boj_day += 1
+            events.append({
+                "datetime": jst.localize(datetime(y, m, boj_day, 12, 0)),
+                "country": "🇯🇵 日本",
+                "event": f"日銀 金融政策決定会合",
+                "impact": "★★★ (大)",
+                "point": "追加利上げスタンス ＆ 総裁会見"
+            })
+
+    # 今日から向こう1か月以内のイベントのみ抽出し、日付順にソート
+    active_events = [ev for ev in events if now_jst <= ev["datetime"] <= end_date]
+    active_events.sort(key=lambda x: x["datetime"])
+
+    if not active_events:
+        return "今後1か月以内に予定されている主要イベントはありません。"
+
+    res = []
+    for ev in active_events:
+        dt = ev["datetime"]
+        date_str = dt.strftime("%m/%d (%a) %H:%M").replace("Mon", "月").replace("Tue", "火").replace("Wed", "水").replace("Thu", "木").replace("Fri", "金").replace("Sat", "土").replace("Sun", "日")
+        res.append({
+            "日程 (日本時間)": date_str,
+            "国 / 地域": ev["country"],
+            "イベント / 経済指標": ev["event"],
+            "影響度": ev["impact"],
+            "注目ポイント": ev["point"]
+        })
+
+    return pd.DataFrame(res).to_markdown(index=False)
 
 def clean_and_format_ticker(raw_text):
     text = unicodedata.normalize('NFKC', str(raw_text)).strip()
@@ -253,6 +366,7 @@ def main():
             files[f"files[{i}]"] = (os.path.basename(chart_path), open(chart_path, "rb"), "image/png")
 
     macro_table = fetch_macro()
+    dynamic_calendar_table = generate_dynamic_calendar()
     stock_summary = "\n".join(stock_texts)
 
     report_text = f"""## 📅 【相場 ＆ テクニカル分析レポート】
@@ -266,8 +380,8 @@ def main():
 
 ---
 
-### ■ 3. 今後1か月の主要マクロイベントカレンダー
-{MACRO_CALENDAR}
+### ■ 3. 今後1か月の主要マクロイベントカレンダー (3段階重要度)
+{dynamic_calendar_table}
 """
     if len(report_text) > 1950:
         report_text = report_text[:1950] + "\n..."
