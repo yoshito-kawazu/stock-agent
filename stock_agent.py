@@ -63,6 +63,16 @@ def analyze_and_plot(ticker, idx):
     if df.empty:
         return None, f"・`{ticker}`: データ取得エラー\n"
 
+    # 企業名の自動取得（日本語名または英語名）
+    company_name = ""
+    try:
+        info = stock.info
+        company_name = info.get("shortName") or info.get("longName") or ""
+    except Exception:
+        company_name = ""
+
+    display_title = f"{ticker} {company_name}".strip()
+
     df['SMA25'] = df['Close'].rolling(window=25).mean()
     df['SMA75'] = df['Close'].rolling(window=75).mean()
 
@@ -89,7 +99,7 @@ def analyze_and_plot(ticker, idx):
     ax1.axhline(recent_high, color="red", linestyle="--", alpha=0.8, label=f"Resistance: ¥{recent_high:.0f}")
     ax1.axhline(recent_low, color="green", linestyle="--", alpha=0.8, label=f"Support: ¥{recent_low:.0f}")
     ax1.plot(df.index[-30:], trend_line, color="purple", linestyle=":", linewidth=1.5, label="Trend Line")
-    ax1.set_title(f"{ticker} Technical Chart & Trends", fontsize=13, fontweight="bold")
+    ax1.set_title(f"{display_title} - Technical Chart", fontsize=13, fontweight="bold")
     ax1.legend(loc="upper left")
     ax1.grid(True, alpha=0.3)
 
@@ -115,7 +125,7 @@ def analyze_and_plot(ticker, idx):
     sig_val = df['Signal'].iloc[-1]
     macd_status = "ゴールデンクロス圏（買い優勢）" if macd_val > sig_val else "デッドクロス圏（調整警戒）"
 
-    text = f"""▼ **{ticker}**
+    text = f"""▼ **{display_title}**
 ・**現在値**: ¥{curr_price:.1f} (前日比: `{pct:+.2f}%`)
 ・**当日レンジ**: 安値 ¥{day_low:.1f} 〜 高値 ¥{day_high:.1f}
 ・**移動平均線**: 25日線 ¥{df['SMA25'].iloc[-1]:.1f} / 75日線 ¥{df['SMA75'].iloc[-1]:.1f}
@@ -160,31 +170,4 @@ def main():
             chart_files.append((f"file{i}", (os.path.basename(chart_path), open(chart_path, "rb"), "image/png")))
 
     macro_table = fetch_macro()
-    stock_summary = "\n".join(stock_texts)
-
-    report_text = f"""## 📅 【相場 ＆ テクニカル分析レポート】
-
-### ■ 1. 注目個別銘柄サマリー
-{stock_summary}
----
-
-### ■ 2. 主要マクロ指標 ＆ 先物一覧
-{macro_table}
-
----
-
-### ■ 3. 今後1か月の主要マクロイベントカレンダー
-{MACRO_CALENDAR}
-"""
-
-    # Discordへテキストと複数画像を送信
-    res = requests.post(
-        DISCORD_WEBHOOK_URL,
-        data={"content": report_text},
-        files=chart_files
-    )
-    print(f"Discord一括送信完了: ステータス {res.status_code}")
-
-if __name__ == "__main__":
-    main()
-
+    stock_summary = "\n".jo
