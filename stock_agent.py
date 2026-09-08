@@ -1,5 +1,6 @@
 import os
 import sys
+import json
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -63,7 +64,6 @@ def analyze_and_plot(ticker, idx):
     if df.empty:
         return None, f"・`{ticker}`: データ取得エラー\n"
 
-    # 企業名の自動取得（日本語名または英語名）
     company_name = ""
     try:
         info = stock.info
@@ -90,84 +90,14 @@ def analyze_and_plot(ticker, idx):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    # チャート描画
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 7), gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), gridspec_kw={'height_ratios':}, sharex=True)
 
-    ax1.plot(df.index, df['Close'], label="Close Price", color="black", alpha=0.7)
+    ax1.plot(df.index, df['Close'], label="Close", color="black", alpha=0.7)
     ax1.plot(df.index, df['SMA25'], label="25 SMA", color="blue", linewidth=1.2)
     ax1.plot(df.index, df['SMA75'], label="75 SMA", color="orange", linewidth=1.2)
     ax1.axhline(recent_high, color="red", linestyle="--", alpha=0.8, label=f"Resistance: ¥{recent_high:.0f}")
     ax1.axhline(recent_low, color="green", linestyle="--", alpha=0.8, label=f"Support: ¥{recent_low:.0f}")
     ax1.plot(df.index[-30:], trend_line, color="purple", linestyle=":", linewidth=1.5, label="Trend Line")
-    ax1.set_title(f"{display_title} - Technical Chart", fontsize=13, fontweight="bold")
-    ax1.legend(loc="upper left")
-    ax1.grid(True, alpha=0.3)
-
-    ax2.plot(df.index, df['MACD'], label="MACD", color="blue")
-    ax2.plot(df.index, df['Signal'], label="Signal", color="red", linestyle="--")
-    ax2.bar(df.index, df['Hist'], label="Hist", color="gray", alpha=0.5)
-    ax2.axhline(0, color="black", linewidth=0.5)
-    ax2.legend(loc="upper left")
-    ax2.grid(True, alpha=0.3)
-
-    plt.tight_layout()
-    chart_path = f"chart_{idx}.png"
-    plt.savefig(chart_path, dpi=110)
-    plt.close()
-
-    curr_price = df['Close'].iloc[-1]
-    prev_price = df['Close'].iloc[-2] if len(df) > 1 else curr_price
-    pct = ((curr_price - prev_price) / prev_price) * 100
-    day_high = df['High'].iloc[-1]
-    day_low = df['Low'].iloc[-1]
-    
-    macd_val = df['MACD'].iloc[-1]
-    sig_val = df['Signal'].iloc[-1]
-    macd_status = "ゴールデンクロス圏（買い優勢）" if macd_val > sig_val else "デッドクロス圏（調整警戒）"
-
-    text = f"""▼ **{display_title}**
-・**現在値**: ¥{curr_price:.1f} (前日比: `{pct:+.2f}%`)
-・**当日レンジ**: 安値 ¥{day_low:.1f} 〜 高値 ¥{day_high:.1f}
-・**移動平均線**: 25日線 ¥{df['SMA25'].iloc[-1]:.1f} / 75日線 ¥{df['SMA75'].iloc[-1]:.1f}
-・🔴 **レジスタンス**: ¥{recent_high:.0f} / 🟢 **サポート**: ¥{recent_low:.0f}
-・📊 **MACD**: {macd_status} (MACD: {macd_val:.2f} / Signal: {sig_val:.2f})
-"""
-    return chart_path, text
-
-def fetch_macro():
-    res = []
-    for name, sym in MACRO_SYMBOLS.items():
-        try:
-            m_ticker = yf.Ticker(sym)
-            m_hist = m_ticker.history(period="5d")
-            if not m_hist.empty:
-                curr = m_hist['Close'].iloc[-1]
-                prev = m_hist['Close'].iloc[-2] if len(m_hist) > 1 else curr
-                high = m_hist['High'].iloc[-1]
-                low = m_hist['Low'].iloc[-1]
-                pct = ((curr - prev) / prev) * 100
-                res.append({
-                    "指標 / 先物": name,
-                    "現在値": f"{curr:.2f}",
-                    "前日比(%)": f"{pct:+.2f}%",
-                    "当日安値": f"{low:.2f}",
-                    "当日高値": f"{high:.2f}"
-                })
-        except Exception as e:
-            print(f"Error {name}: {e}")
-    return pd.DataFrame(res).to_markdown(index=False)
-
-def main():
-    tickers = get_target_tickers()
-    
-    stock_texts = []
-    chart_files = []
-    
-    for i, t in enumerate(tickers):
-        chart_path, text = analyze_and_plot(t, i)
-        stock_texts.append(text)
-        if chart_path:
-            chart_files.append((f"file{i}", (os.path.basename(chart_path), open(chart_path, "rb"), "image/png")))
-
-    macro_table = fetch_macro()
-    stock_summary = "\n".jo
+    ax1.set_title(f"{display_title} - Technical Chart", fontsize=12, fontweight="bold")
+    ax1.legend(loc="upper left", fontsize=8)
+   
