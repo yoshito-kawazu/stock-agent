@@ -1,6 +1,8 @@
 import os
 import sys
 import json
+import re
+import unicodedata
 import yfinance as yf
 import pandas as pd
 import numpy as np
@@ -14,7 +16,20 @@ if not SPREADSHEET_ID or not DISCORD_WEBHOOK_URL:
     print("【エラー】SPREADSHEET_ID または DISCORD_WEBHOOK_URL が設定されていません。")
     sys.exit(1)
 
-# マクロ指標 ＆ 先物の定義（取得優先シンボルのリスト）
+# 主要企業名マップ（日本語・英語の会社名対応）
+COMPANY_NAMES = {
+    "7003.T": "三井E&S",
+    "6525.T": "KOKUSAI ELECTRIC",
+    "6855.T": "日本電子材料",
+    "8035.T": "東京エレクトロン",
+    "6920.T": "レーザーテック",
+    "9984.T": "ソフトバンクG",
+    "6758.T": "ソニーグループ",
+    "7203.T": "トヨタ自動車",
+    "NK=F": "日経225先物",
+    "^N225": "日経平均株価",
+}
+
 MACRO_DEFINITIONS = [
     {"name": "日経平均先物 (大証/CME)", "symbols": ["NK=F", "NIY=F", "NKD=F", "^N225"]},
     {"name": "Nasdaq100先物 (CME)", "symbols": ["NQ=F", "^IXIC"]},
@@ -33,59 +48,85 @@ MACRO_CALENDAR = """
 | 10/02 (金) 21:30 | 🇺🇸 米国 | 米9月 雇用統計 | ★★★ (大) | 労働市場の減速ペース |
 """
 
-def format_ticker_symbol(t_str):
-    t = t_str.strip()
-    if t.startswith("^") or "=" in t or ".T" in t or t.upper() in ["NK=F", "NQ=F", "CL=F", "NIY=F"]:
-        return t
-    if t in ["日経先物", "日経平均先物"]:
+def clean_and_format_ticker(raw_text):
+    # 全角を半角に正規化
+    text = unicodedata.normalize('NFKC', str(raw_text)).strip()
+    
+    # 既知のキーワード判定
+    if "三井" in text or "7003" in text:
+        return "7003.T"
+    if "KOKUSAI" in text.upper() or "コクサイ" in text or "6525" in text:
+        return "6525.T"
+    if "日本電子材料" in text or "6855" in text:
+        return "6855.T"
+    if "先物" in text or "NK" in text.upper():
         return "NK=F"
-    if t in ["日経平均", "日経225"]:
+    if "日経" in text:
         return "^N225"
-    if t.isdigit():
-        return f"{t}.T"
-    return t
+        
+    # 数字4桁または数字抽出
+    digits = re.findall(r'\d+', text)
+    if digits:
+        code = digits[0]
+        if len(code) == 4:
+            return f"{code}.T"
+            
+    if text.startswith("^") or "=" in text or ".T" in text:
+        return text
+    return f"{text}.T"
 
 def get_target_tickers():
     try:
         url = f"https://docs.google.com/spreadsheets/d/{SPREADSHEET_ID}/export?format=csv"
         df = pd.read_csv(url, header=None)
         
-        raw_items = []
-        for val in df.values.flatten():
-            if pd.notna(val):
-                for item in str(val).split(","):
-                    item_clean = item.strip()
-                    if item_clean:
-                        raw_items.append(item_clean)
-        
         tickers = []
-        for t in raw_items:
-            formatted = format_ticker_symbol(t)
-            if formatted not in tickers:
-                tickers.append(formatted)
+        for val in df.values.flatten():
+            if pd.notna(val) and str(val).strip():
+                items = str(val).split(",")
+                for item in items:
+                    t = clean_and_format_ticker(item)
+                    if t and t not in tickers:
+                        tickers.append(t)
         
-        print(f"取得した個別監視銘柄: {tickers}")
+        print(f"解析後の監視対象銘柄: {tickers}")
         return tickers if tickers else ["7003.T", "6525.T"]
     except Exception as e:
         print(f"スプレッドシート読込警告: {e} ➜ デフォルト 7003.T, 6525.T を使用")
         return ["7003.T", "6525.T"]
 
+def fetch_history_safely(ticker):
+    try:
+        stock = yf.Ticker(ticker)
+        df = stock.history(period="6mo")
+        if not df.empty and len(df) >= 5:
+            return df
+    except Exception:
+        pass
+        
+    # フォールバック: yf.download
+    try:
+        df = yf.download(ticker, period="6mo", progress=False)
+        if not df.empty and len(df) >= 5:
+            if isinstance(df.columns, pd.MultiIndex):
+                df.columns = df.columns.get_level_values(0)
+            return df
+    except Exception as e:
+        print(f"yf.download error for {ticker}: {e}")
+    return pd.DataFrame()
+
 def analyze_and_plot(ticker, idx):
     print(f"[{ticker}] チャート生成 ＆ 分析中...")
-    stock = yf.Ticker(ticker)
-    df = stock.history(period="6mo")
-    if df.empty:
-        return None, f"・`{ticker}`: データ取得エラー\n"
-
-    company_name = ""
-    try:
-        info = stock.info
-        company_name = info.get("shortName") or info.get("longName") or ""
-    except Exception:
-        company_name = ""
-
+    df = fetch_history_safely(ticker)
+    
+    company_name = COMPANY_NAMES.get(ticker, "")
     display_title = f"{ticker} {company_name}".strip()
 
+    if df.empty or len(df) < 5:
+        print(f"【警告】{ticker} のデータ取得に失敗しました。")
+        return None, f"▼ **{display_title}**\n・データ取得エラー（シンボル: `{ticker}`）\n"
+
+    # テクニカル指標計算
     df['SMA25'] = df['Close'].rolling(window=25).mean()
     df['SMA75'] = df['Close'].rolling(window=75).mean()
 
@@ -103,15 +144,18 @@ def analyze_and_plot(ticker, idx):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    # 上段と下段の高さ比率
+    # チャート描画
     ratio_list = (3, 1)
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), gridspec_kw=dict(height_ratios=ratio_list), sharex=True)
 
     ax1.plot(df.index, df['Close'], label="Close", color="black", alpha=0.7)
-    ax1.plot(df.index, df['SMA25'], label="25 SMA", color="blue", linewidth=1.2)
-    ax1.plot(df.index, df['SMA75'], label="75 SMA", color="orange", linewidth=1.2)
-    ax1.axhline(recent_high, color="red", linestyle="--", alpha=0.8, label=f"Resistance: ¥{recent_high:.0f}")
-    ax1.axhline(recent_low, color="green", linestyle="--", alpha=0.8, label=f"Support: ¥{recent_low:.0f}")
+    if not df['SMA25'].isna().all():
+        ax1.plot(df.index, df['SMA25'], label="25 SMA", color="blue", linewidth=1.2)
+    if not df['SMA75'].isna().all():
+        ax1.plot(df.index, df['SMA75'], label="75 SMA", color="orange", linewidth=1.2)
+        
+    ax1.axhline(recent_high, color="red", linestyle="--", alpha=0.8, label=f"Resistance: ¥{recent_high:,.0f}")
+    ax1.axhline(recent_low, color="green", linestyle="--", alpha=0.8, label=f"Support: ¥{recent_low:,.0f}")
     ax1.plot(df.index[-30:], trend_line, color="purple", linestyle=":", linewidth=1.5, label="Trend Line")
     ax1.set_title(f"{display_title} - Technical Chart", fontsize=12, fontweight="bold")
     ax1.legend(loc="upper left", fontsize=8)
@@ -129,21 +173,26 @@ def analyze_and_plot(ticker, idx):
     plt.savefig(chart_path, dpi=100)
     plt.close()
 
-    curr_price = df['Close'].iloc[-1]
-    prev_price = df['Close'].iloc[-2] if len(df) > 1 else curr_price
+    curr_price = float(df['Close'].iloc[-1])
+    prev_price = float(df['Close'].iloc[-2]) if len(df) > 1 else curr_price
     pct = ((curr_price - prev_price) / prev_price) * 100
-    day_high = df['High'].iloc[-1]
-    day_low = df['Low'].iloc[-1]
+    day_high = float(df['High'].iloc[-1])
+    day_low = float(df['Low'].iloc[-1])
+    sma25_val = df['SMA25'].iloc[-1]
+    sma75_val = df['SMA75'].iloc[-1]
     
-    macd_val = df['MACD'].iloc[-1]
-    sig_val = df['Signal'].iloc[-1]
+    sma25_str = f"¥{sma25_val:,.1f}" if pd.notna(sma25_val) else "-"
+    sma75_str = f"¥{sma75_val:,.1f}" if pd.notna(sma75_val) else "-"
+
+    macd_val = float(df['MACD'].iloc[-1])
+    sig_val = float(df['Signal'].iloc[-1])
     macd_status = "ゴールデンクロス圏（買い優勢）" if macd_val > sig_val else "デッドクロス圏（調整警戒）"
 
     text = f"""▼ **{display_title}**
-・**現在値**: ¥{curr_price:.1f} (前日比: `{pct:+.2f}%`)
-・**当日レンジ**: 安値 ¥{day_low:.1f} 〜 高値 ¥{day_high:.1f}
-・**移動平均線**: 25日線 ¥{df['SMA25'].iloc[-1]:.1f} / 75日線 ¥{df['SMA75'].iloc[-1]:.1f}
-・🔴 **レジスタンス**: ¥{recent_high:.0f} / 🟢 **サポート**: ¥{recent_low:.0f}
+・**現在値**: ¥{curr_price:,.1f} (前日比: `{pct:+.2f}%`)
+・**当日レンジ**: 安値 ¥{day_low:,.1f} 〜 高値 ¥{day_high:,.1f}
+・**移動平均線**: 25日線 {sma25_str} / 75日線 {sma75_str}
+・🔴 **レジスタンス**: ¥{recent_high:,.0f} / 🟢 **サポート**: ¥{recent_low:,.0f}
 ・📊 **MACD**: {macd_status} (MACD: {macd_val:.2f} / Signal: {sig_val:.2f})
 """
     return chart_path, text
@@ -159,10 +208,10 @@ def fetch_macro():
                 m_ticker = yf.Ticker(sym)
                 m_hist = m_ticker.history(period="5d")
                 if not m_hist.empty and len(m_hist) >= 1:
-                    curr = m_hist['Close'].iloc[-1]
-                    prev = m_hist['Close'].iloc[-2] if len(m_hist) > 1 else curr
-                    high = m_hist['High'].iloc[-1]
-                    low = m_hist['Low'].iloc[-1]
+                    curr = float(m_hist['Close'].iloc[-1])
+                    prev = float(m_hist['Close'].iloc[-2]) if len(m_hist) > 1 else curr
+                    high = float(m_hist['High'].iloc[-1])
+                    low = float(m_hist['Low'].iloc[-1])
                     pct = ((curr - prev) / prev) * 100
                     res.append({
                         "指標 / 先物": name,
@@ -173,7 +222,7 @@ def fetch_macro():
                     })
                     fetched = True
                     break
-            except Exception as e:
+            except Exception:
                 continue
         if not fetched:
             res.append({
