@@ -14,12 +14,13 @@ if not SPREADSHEET_ID or not DISCORD_WEBHOOK_URL:
     print("【エラー】SPREADSHEET_ID または DISCORD_WEBHOOK_URL が設定されていません。")
     sys.exit(1)
 
-MACRO_SYMBOLS = {
-    "USD/JPY": "USDJPY=X",
-    "WTI原油先物": "CL=F",
-    "日経平均先物": "NK=F",
-    "Nasdaq100先物": "NQ=F",
-}
+# マクロ指標 ＆ 先物の定義（取得優先シンボルのリスト）
+MACRO_DEFINITIONS = [
+    {"name": "日経平均先物 (大証/CME)", "symbols": ["NK=F", "NIY=F", "NKD=F", "^N225"]},
+    {"name": "Nasdaq100先物 (CME)", "symbols": ["NQ=F", "^IXIC"]},
+    {"name": "ドル/円 (USD/JPY)", "symbols": ["USDJPY=X"]},
+    {"name": "WTI原油先物", "symbols": ["CL=F"]},
+]
 
 MACRO_CALENDAR = """
 | 日程 (日本時間) | 国 / 地域 | イベント / 経済指標 | 影響度 | 注目ポイント |
@@ -31,6 +32,18 @@ MACRO_CALENDAR = """
 | 10/01 (木) 08:50 | 🇯🇵 日本 | 日銀短観 (9月調査) | ★★☆ (中) | 国内企業の景況感 |
 | 10/02 (金) 21:30 | 🇺🇸 米国 | 米9月 雇用統計 | ★★★ (大) | 労働市場の減速ペース |
 """
+
+def format_ticker_symbol(t_str):
+    t = t_str.strip()
+    if t.startswith("^") or "=" in t or ".T" in t or t.upper() in ["NK=F", "NQ=F", "CL=F", "NIY=F"]:
+        return t
+    if t in ["日経先物", "日経平均先物"]:
+        return "NK=F"
+    if t in ["日経平均", "日経225"]:
+        return "^N225"
+    if t.isdigit():
+        return f"{t}.T"
+    return t
 
 def get_target_tickers():
     try:
@@ -47,11 +60,11 @@ def get_target_tickers():
         
         tickers = []
         for t in raw_items:
-            t_formatted = t if ".T" in t else f"{t}.T"
-            if t_formatted not in tickers:
-                tickers.append(t_formatted)
+            formatted = format_ticker_symbol(t)
+            if formatted not in tickers:
+                tickers.append(formatted)
         
-        print(f"取得した監視銘柄: {tickers}")
+        print(f"取得した個別監視銘柄: {tickers}")
         return tickers if tickers else ["7003.T", "6525.T"]
     except Exception as e:
         print(f"スプレッドシート読込警告: {e} ➜ デフォルト 7003.T, 6525.T を使用")
@@ -90,7 +103,7 @@ def analyze_and_plot(ticker, idx):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    ratio_list = [3, 1]
+    ratio_list =
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), gridspec_kw=dict(height_ratios=ratio_list), sharex=True)
 
     ax1.plot(df.index, df['Close'], label="Close", color="black", alpha=0.7)
@@ -135,26 +148,40 @@ def analyze_and_plot(ticker, idx):
     return chart_path, text
 
 def fetch_macro():
+    print("マクロ指標 ＆ 先物データ取得中...")
     res = []
-    for name, sym in MACRO_SYMBOLS.items():
-        try:
-            m_ticker = yf.Ticker(sym)
-            m_hist = m_ticker.history(period="5d")
-            if not m_hist.empty:
-                curr = m_hist['Close'].iloc[-1]
-                prev = m_hist['Close'].iloc[-2] if len(m_hist) > 1 else curr
-                high = m_hist['High'].iloc[-1]
-                low = m_hist['Low'].iloc[-1]
-                pct = ((curr - prev) / prev) * 100
-                res.append({
-                    "指標 / 先物": name,
-                    "現在値": f"{curr:.2f}",
-                    "前日比(%)": f"{pct:+.2f}%",
-                    "当日安値": f"{low:.2f}",
-                    "当日高値": f"{high:.2f}"
-                })
-        except Exception as e:
-            print(f"Error {name}: {e}")
+    for item in MACRO_DEFINITIONS:
+        name = item["name"]
+        fetched = False
+        for sym in item["symbols"]:
+            try:
+                m_ticker = yf.Ticker(sym)
+                m_hist = m_ticker.history(period="5d")
+                if not m_hist.empty and len(m_hist) >= 1:
+                    curr = m_hist['Close'].iloc[-1]
+                    prev = m_hist['Close'].iloc[-2] if len(m_hist) > 1 else curr
+                    high = m_hist['High'].iloc[-1]
+                    low = m_hist['Low'].iloc[-1]
+                    pct = ((curr - prev) / prev) * 100
+                    res.append({
+                        "指標 / 先物": name,
+                        "現在値": f"{curr:,.2f}",
+                        "前日比(%)": f"{pct:+.2f}%",
+                        "当日安値": f"{low:,.2f}",
+                        "当日高値": f"{high:,.2f}"
+                    })
+                    fetched = True
+                    break
+            except Exception as e:
+                continue
+        if not fetched:
+            res.append({
+                "指標 / 先物": name,
+                "現在値": "-",
+                "前日比(%)": "-",
+                "当日安値": "-",
+                "当日高値": "-"
+            })
     return pd.DataFrame(res).to_markdown(index=False)
 
 def main():
