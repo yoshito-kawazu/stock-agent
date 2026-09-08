@@ -16,7 +16,6 @@ if not SPREADSHEET_ID or not DISCORD_WEBHOOK_URL:
 MACRO_SYMBOLS = {
     "USD/JPY": "USDJPY=X",
     "WTI原油先物": "CL=F",
-    "日本10年国債利回り": "^TNX",
     "日経平均先物": "NK=F",
     "Nasdaq100先物": "NQ=F",
 }
@@ -65,7 +64,8 @@ def generate_chart(ticker):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios':}, sharex=True)
+    # 修正箇所: [3, 1] を指定
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(10, 8), gridspec_kw={'height_ratios': [3, 1]}, sharex=True)
 
     ax1.plot(df.index, df['Close'], label="Close Price", color="black", alpha=0.7)
     ax1.plot(df.index, df['SMA25'], label="25 SMA", color="blue", linewidth=1.2)
@@ -155,7 +155,7 @@ def main():
             data={"content": report_text},
             files={"file": ("chart.png", f, "image/png")}
         )
-    print(f"送信完了: ステータスコード {res.status_code}")
+    print(f"Discord送信完了: ステータスコード {res.status_code}")
 
 if __name__ == "__main__":
     main()
