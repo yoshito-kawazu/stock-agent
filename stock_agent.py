@@ -82,7 +82,7 @@ def generate_dynamic_calendar():
 
         # 2. 米CPI（毎月中旬 12日前後の平日 21:30）
         cpi_day = 12
-        while datetime(y, m, cpi_day).weekday() >= 5: # 土日回避
+        while datetime(y, m, cpi_day).weekday() >= 5:
             cpi_day += 1
         events.append({
             "datetime": jst.localize(datetime(y, m, cpi_day, 21, 30)),
@@ -103,8 +103,9 @@ def generate_dynamic_calendar():
                 "point": "FRB重視の物価指標"
             })
 
-        # 4. 日銀短観（4月・7月・10月・12月の1日頃 08:50）
-        if m in:
+        # 4. 日銀短観（4月, 7月, 10月, 12月の月初 08:50）
+        tankan_months = (4, 7, 10, 12)
+        if m in tankan_months:
             tankan_day = 1
             while datetime(y, m, tankan_day).weekday() >= 5:
                 tankan_day += 1
@@ -117,32 +118,35 @@ def generate_dynamic_calendar():
             })
 
         # 5. FOMC 政策金利（1, 3, 5, 6, 7, 9, 11, 12月の中下旬 03:00）
-        if m in:
-            fomc_day = 18 if m in else 28
+        fomc_months = (1, 3, 5, 6, 7, 9, 11, 12)
+        fomc_mid_months = (3, 6, 9, 12)
+        if m in fomc_months:
+            fomc_day = 18 if m in fomc_mid_months else 28
             while datetime(y, m, fomc_day).weekday() >= 5:
                 fomc_day += 1
             events.append({
                 "datetime": jst.localize(datetime(y, m, fomc_day, 3, 0)),
                 "country": "🇺🇸 米国",
-                "event": f"FOMC 政策金利発表 ＆ 議長会見",
+                "event": "FOMC 政策金利発表 ＆ 議長会見",
                 "impact": "★★★ (大)",
                 "point": "利下げ/利上げ判断 ＆ 経済見通し"
             })
 
         # 6. 日銀金融政策決定会合（1, 3, 4, 6, 7, 9, 10, 12月の中下旬 12:00）
-        if m in:
-            boj_day = 19 if m in else 29
+        boj_months = (1, 3, 4, 6, 7, 9, 10, 12)
+        boj_mid_months = (3, 6, 9, 12)
+        if m in boj_months:
+            boj_day = 19 if m in boj_mid_months else 29
             while datetime(y, m, boj_day).weekday() >= 5:
                 boj_day += 1
             events.append({
                 "datetime": jst.localize(datetime(y, m, boj_day, 12, 0)),
                 "country": "🇯🇵 日本",
-                "event": f"日銀 金融政策決定会合",
+                "event": "日銀 金融政策決定会合",
                 "impact": "★★★ (大)",
                 "point": "追加利上げスタンス ＆ 総裁会見"
             })
 
-    # 今日から向こう1か月以内のイベントのみ抽出し、日付順にソート
     active_events = [ev for ev in events if now_jst <= ev["datetime"] <= end_date]
     active_events.sort(key=lambda x: x["datetime"])
 
