@@ -16,7 +16,7 @@ if not SPREADSHEET_ID or not DISCORD_WEBHOOK_URL:
     print("【エラー】SPREADSHEET_ID または DISCORD_WEBHOOK_URL が設定されていません。")
     sys.exit(1)
 
-# 主要企業名マップ（日本語・英語の会社名対応）
+# 主要企業名マップ
 COMPANY_NAMES = {
     "7003.T": "三井E&S",
     "6525.T": "KOKUSAI ELECTRIC",
@@ -30,11 +30,13 @@ COMPANY_NAMES = {
     "^N225": "日経平均株価",
 }
 
+# マクロ指標 ＆ 先物一覧の定義（日本10年国債利回りを追加）
 MACRO_DEFINITIONS = [
-    {"name": "日経平均先物 (大証/CME)", "symbols": ["NK=F", "NIY=F", "NKD=F", "^N225"]},
-    {"name": "Nasdaq100先物 (CME)", "symbols": ["NQ=F", "^IXIC"]},
-    {"name": "ドル/円 (USD/JPY)", "symbols": ["USDJPY=X"]},
-    {"name": "WTI原油先物", "symbols": ["CL=F"]},
+    {"name": "日経平均先物 (大証/CME)", "symbols": ["NK=F", "NIY=F", "NKD=F", "^N225"], "is_yield": False},
+    {"name": "Nasdaq100先物 (CME)", "symbols": ["NQ=F", "^IXIC"], "is_yield": False},
+    {"name": "ドル/円 (USD/JPY)", "symbols": ["USDJPY=X"], "is_yield": False},
+    {"name": "WTI原油先物", "symbols": ["CL=F"], "is_yield": False},
+    {"name": "日本10年国債利回り", "symbols": ["JP10YT=XX", "^TNX"], "is_yield": True},
 ]
 
 MACRO_CALENDAR = """
@@ -49,10 +51,7 @@ MACRO_CALENDAR = """
 """
 
 def clean_and_format_ticker(raw_text):
-    # 全角を半角に正規化
     text = unicodedata.normalize('NFKC', str(raw_text)).strip()
-    
-    # 既知のキーワード判定
     if "三井" in text or "7003" in text:
         return "7003.T"
     if "KOKUSAI" in text.upper() or "コクサイ" in text or "6525" in text:
@@ -64,7 +63,6 @@ def clean_and_format_ticker(raw_text):
     if "日経" in text:
         return "^N225"
         
-    # 数字4桁または数字抽出
     digits = re.findall(r'\d+', text)
     if digits:
         code = digits[0]
@@ -104,7 +102,6 @@ def fetch_history_safely(ticker):
     except Exception:
         pass
         
-    # フォールバック: yf.download
     try:
         df = yf.download(ticker, period="6mo", progress=False)
         if not df.empty and len(df) >= 5:
@@ -126,7 +123,6 @@ def analyze_and_plot(ticker, idx):
         print(f"【警告】{ticker} のデータ取得に失敗しました。")
         return None, f"▼ **{display_title}**\n・データ取得エラー（シンボル: `{ticker}`）\n"
 
-    # テクニカル指標計算
     df['SMA25'] = df['Close'].rolling(window=25).mean()
     df['SMA75'] = df['Close'].rolling(window=75).mean()
 
@@ -144,7 +140,6 @@ def analyze_and_plot(ticker, idx):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    # チャート描画
     ratio_list = (3, 1)
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), gridspec_kw=dict(height_ratios=ratio_list), sharex=True)
 
@@ -202,6 +197,7 @@ def fetch_macro():
     res = []
     for item in MACRO_DEFINITIONS:
         name = item["name"]
+        is_yield = item.get("is_yield", False)
         fetched = False
         for sym in item["symbols"]:
             try:
@@ -213,13 +209,23 @@ def fetch_macro():
                     high = float(m_hist['High'].iloc[-1])
                     low = float(m_hist['Low'].iloc[-1])
                     pct = ((curr - prev) / prev) * 100
-                    res.append({
-                        "指標 / 先物": name,
-                        "現在値": f"{curr:,.2f}",
-                        "前日比(%)": f"{pct:+.2f}%",
-                        "当日安値": f"{low:,.2f}",
-                        "当日高値": f"{high:,.2f}"
-                    })
+                    
+                    if is_yield:
+                        res.append({
+                            "指標 / 先物": name,
+                            "現在値": f"{curr:.3f}%",
+                            "前日比(%)": f"{pct:+.2f}%",
+                            "当日安値": f"{low:.3f}%",
+                            "当日高値": f"{high:.3f}%"
+                        })
+                    else:
+                        res.append({
+                            "指標 / 先物": name,
+                            "現在値": f"{curr:,.2f}",
+                            "前日比(%)": f"{pct:+.2f}%",
+                            "当日安値": f"{low:,.2f}",
+                            "当日高値": f"{high:,.2f}"
+                        })
                     fetched = True
                     break
             except Exception:
