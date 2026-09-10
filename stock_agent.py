@@ -25,7 +25,6 @@ MACRO_DEFINITIONS = [
     {"name": "WTI原油先物", "symbols": ["CL=F"]},
 ]
 
-# 代表イベント分類・統合マッピング（正規表現, 統一イベント名, 注目ポイント, グループキー）
 EVENT_CONSOLIDATION_RULES = [
     (r"Inflation Rate|Consumer Price|CPI", "米CPI (消費者物価指数)", "総合 ＆ コア物価上昇率 (前年比・前月比)", "CPI"),
     (r"Fed Interest Rate|FOMC|Federal Funds", "FOMC 政策金利発表 ＆ 議長会見", "金利判断・ドットチャート・パウエル会見", "FOMC"),
@@ -45,11 +44,8 @@ def classify_event(title):
             return unified_name, point, group_key
     return title, "主要経済指標発表", title
 
-# TradingViewの公式APIから1か月分の最重要マクロイベントを1本化して取得
-def fetch_tradingview_macro_calendar():
+def fetch_tradingview_macro_calendar(now_jst):
     print("TradingView APIから向こう1か月分の経済カレンダーを取得中...")
-    jst = pytz.timezone('Asia/Tokyo')
-    now_jst = datetime.now(jst)
     end_jst = now_jst + timedelta(days=32)
 
     url = "https://economic-calendar.tradingview.com/events"
@@ -74,14 +70,13 @@ def fetch_tradingview_macro_calendar():
             data = res.json().get("result", [])
             for item in data:
                 importance = int(item.get("importance", 0))
-                # 最重要イベント（★★★）のみ対象
                 if importance == 1:
                     title = item.get("title", "")
                     country = item.get("country", "")
                     date_str = item.get("date", "")
 
                     dt_utc = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
-                    dt_jst = dt_utc.astimezone(jst)
+                    dt_jst = dt_utc.astimezone(pytz.timezone('Asia/Tokyo'))
 
                     if now_jst <= dt_jst <= end_jst:
                         unified_name, point, group_key = classify_event(title)
@@ -97,10 +92,8 @@ def fetch_tradingview_macro_calendar():
     except Exception as e:
         print(f"TradingView API取得エラー: {e}")
 
-    # 日時順にソート
     events.sort(key=lambda x: x["datetime"])
     
-    # 同一日付・同一イベントグループの完全重複統合（1つに集約）
     consolidated_events = []
     seen_groups = set()
     for ev in events:
@@ -349,6 +342,13 @@ def fetch_macro():
     return pd.DataFrame(res).to_markdown(index=False)
 
 def main():
+    jst = pytz.timezone('Asia/Tokyo')
+    now_jst = datetime.now(jst)
+    
+    # 毎朝9時台（または手動テスト実行時）のみカレンダーを表示
+    # ※GitHub Actions Cronの 0:00 UTC = 9:00 JST
+    is_morning_report = (now_jst.hour == 9)
+
     tickers = get_target_tickers()
     
     stock_texts = []
@@ -361,23 +361,23 @@ def main():
             files[f"files[{i}]"] = (os.path.basename(chart_path), open(chart_path, "rb"), "image/png")
 
     macro_table = fetch_macro()
-    dynamic_calendar_table = fetch_tradingview_macro_calendar()
     stock_summary = "\n".join(stock_texts)
 
-    report_text = f"""## 📅 【相場 ＆ テクニカル分析レポート】
+    time_str = now_jst.strftime("%m/%d %H:%M 現在")
 
-### ■ 1. 注目個別銘柄サマリー
-{stock_summary}
----
+    report_sections = [
+        f"## 📅 【相場 ＆ テクニカル分析レポート】 ({time_str})\n",
+        f"### ■ 1. 注目個別銘柄サマリー\n{stock_summary}",
+        f"---\n### ■ 2. 主要マクロ指標 ＆ 先物一覧\n{macro_table}"
+    ]
 
-### ■ 2. 主要マクロ指標 ＆ 先物一覧
-{macro_table}
+    # 朝9時の配信時のみマクロカレンダーを追加
+    if is_morning_report:
+        dynamic_calendar_table = fetch_tradingview_macro_calendar(now_jst)
+        report_sections.append(f"---\n### ■ 3. 今後1か月の主要マクロイベント (重要度 ★★★ のみ)\n{dynamic_calendar_table}")
 
----
+    report_text = "\n\n".join(report_sections)
 
-### ■ 3. 今後1か月の主要マクロイベント (重要度 ★★★ のみ)
-{dynamic_calendar_table}
-"""
     if len(report_text) > 1950:
         report_text = report_text[:1950] + "\n..."
 
