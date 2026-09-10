@@ -58,7 +58,6 @@ def fetch_tradingview_macro_calendar():
         "User-Agent": "Mozilla/5.0"
     }
 
-    # ISO 8601 UTC形式で1か月分の期間を指定
     from_utc = now_jst.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
     to_utc = end_jst.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
@@ -74,21 +73,20 @@ def fetch_tradingview_macro_calendar():
         if res.status_code == 200:
             data = res.json().get("result", [])
             for item in data:
-                importance = item.get("importance", 0)
-                # 重要度が高いイベント（High: 1 または Medium: 0）を抽出
-                if importance in:
+                importance = int(item.get("importance", 0))
+                # 重要度判定（1: 大, 0: 中）
+                if importance >= 0:
                     title = item.get("title", "")
                     country = item.get("country", "")
                     date_str = item.get("date", "")
 
-                    # 日時パース
                     dt_utc = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
                     dt_jst = dt_utc.astimezone(jst)
 
                     if now_jst <= dt_jst <= end_jst:
                         name_jp, point_jp = translate_event_title(title)
                         country_display = "🇺🇸 米国" if country == "US" else "🇯🇵 日本"
-                        impact_display = "★★★ (大)" if importance == 1 else "★★☆ (中)"
+                        impact_display = "★★★ (大)" if importance >= 1 else "★★☆ (中)"
 
                         events.append({
                             "datetime": dt_jst,
@@ -100,7 +98,6 @@ def fetch_tradingview_macro_calendar():
     except Exception as e:
         print(f"TradingView API取得エラー: {e}")
 
-    # 日時順にソート & 重複整理
     events.sort(key=lambda x: x["datetime"])
     
     unique_events = []
@@ -115,7 +112,6 @@ def fetch_tradingview_macro_calendar():
         return "今後1か月以内に予定されている主要マクロイベントはありません。"
 
     formatted = []
-    # Discordの文字数制限に配慮して上位12件を抽出
     for ev in unique_events[:12]:
         dt = ev["datetime"]
         date_str = dt.strftime("%m/%d (%a) %H:%M").replace("Mon", "月").replace("Tue", "火").replace("Wed", "水").replace("Thu", "木").replace("Fri", "金").replace("Sat", "土").replace("Sun", "日")
@@ -231,8 +227,8 @@ def analyze_and_plot(ticker, idx):
     slope, intercept = np.polyfit(x, y, 1)
     trend_line = slope * x + intercept
 
-    ratio_list = (3, 1)
-    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), gridspec_kw=dict(height_ratios=ratio_list), sharex=True)
+    ratio_tuple = (3, 1)
+    fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(9, 6), gridspec_kw=dict(height_ratios=ratio_tuple), sharex=True)
 
     ax1.plot(df.index, df['Close'], label="Close", color="black", alpha=0.7)
     if not df['SMA25'].isna().all():
