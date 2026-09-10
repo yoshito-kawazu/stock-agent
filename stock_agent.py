@@ -25,79 +25,29 @@ MACRO_DEFINITIONS = [
     {"name": "WTI原油先物", "symbols": ["CL=F"]},
 ]
 
-# 包括的な金融イベント日本語翻訳・注目ポイント辞書
-TRANSLATION_MAP = [
-    # CPI・インフレ
-    (r"Core Inflation Rate.*YoY", "米コアCPI (消費者物価指数・前年比)", "食品・エネルギーを除く基調的インフレ"),
-    (r"Core Inflation Rate.*MoM", "米コアCPI (消費者物価指数・前月比)", "直近1か月のインフレモメンタム"),
-    (r"Inflation Rate.*YoY", "米CPI (消費者物価指数・前年比)", "総合インフレ動向・前年比の伸び"),
-    (r"Inflation Rate.*MoM", "米CPI (消費者物価指数・前月比)", "総合インフレ動向・前月比"),
-    (r"Tokyo.*CPI", "東京都区部 CPI (消費者物価指数)", "全国インフレの先行指標"),
-    (r"Consumer Price Index|CPI", "消費者物価指数 (CPI)", "物価上昇率"),
-
-    # 中央銀行（FRB / 日銀）
-    (r"Fed Interest Rate Decision", "FOMC 政策金利発表 ＆ 声明", "利下げ/利上げ判断・政策スタンス"),
-    (r"FOMC Economic Projections", "FOMC 経済見通し (ドットチャート)", "FRB高官による今後の金利予想"),
-    (r"FOMC Press Conference|Fed Press Conference", "パウエルFRB議長 記者会見", "今後の利下げペースに関する発言"),
-    (r"FOMC Minutes|Meeting Minutes", "FOMC 議事要旨", "会合での議論詳細・意見対立点"),
-    (r"BoJ Interest Rate Decision|Bank of Japan Interest Rate", "日銀 金融政策決定会合", "追加利上げスタンス ＆ 政策金利"),
-    (r"BoJ Monetary Policy Statement", "日銀 政策声明 ＆ 展望レポート", "物価見通しと経済成長率予測"),
-    (r"BoJ Press Conference", "植田日銀総裁 記者会見", "追加利上げ時期・為替動向への言及"),
-
-    # 雇用・労働市場
-    (r"Non Farm Payrolls|Nonfarm Payrolls", "米非農業部門雇用者数 (雇用統計)", "労働市場の新規雇用ペース"),
-    (r"Unemployment Rate", "失業率", "労働市場の需給バランス"),
-    (r"Average Hourly Earnings.*YoY", "米平均時給 (前年比)", "賃金インフレの継続性"),
-    (r"Average Hourly Earnings.*MoM", "米平均時給 (前月比)", "賃金上昇ペース"),
-    (r"Initial Jobless Claims", "米新規失業保険申請件数", "週次の雇用情勢・解雇動向"),
-    (r"JOLTs Job Openings", "米JOLTS 求人件数", "企業の求人需要・人手不足感"),
-
-    # PCE・個人消費
-    (r"Core PCE Price Index.*YoY", "米コアPCEデフレーター (前年比)", "FRB最重視のインフレ指標"),
-    (r"Core PCE Price Index.*MoM", "米コアPCEデフレーター (前月比)", "直近の個人消費物価"),
-    (r"PCE Price Index.*YoY", "米PCEデフレーター (前年比)", "個人消費支出物価指数"),
-    (r"Personal Income", "米個人所得", "家計の所得動向"),
-    (r"Personal Spending", "米個人消費支出", "個人消費の強さ"),
-
-    # 景況感・企業マインド
-    (r"ISM Manufacturing PMI", "米ISM製造業景況指数", "製造業マインドの景気分岐点(50)"),
-    (r"ISM Services PMI", "米ISM非製造業景況指数", "サービス業マインドの強さ"),
-    (r"Tankan.*Large Manufacturers", "日銀短観 (大企業製造業DI)", "国内製造業の景況感"),
-    (r"Tankan", "日銀短観", "大企業景況感・設備投資動向"),
-    (r"Michigan Consumer Sentiment", "ミシガン大学消費者信頼感指数", "家計のマインド・期待インフレ率"),
-    (r"CB Consumer Confidence", "米消費者信頼感指数 (CB)", "消費者マインドと雇用認識"),
-
-    # 生産・成長・貿易
-    (r"GDP Growth Rate.*QoQ", "米実質GDP (前期比年率)", "四半期経済成長率"),
-    (r"GDP Price Index", "米GDPデフレーター", "国内総生産ベースの物価動向"),
-    (r"Retail Sales.*MoM", "米小売売上高 (前月比)", "米国経済の柱である個人消費動向"),
-    (r"PPI.*MoM|Producer Prices", "米PPI (生産者物価指数)", "川上段階での物価圧力"),
-    (r"Trade Balance|Balance of Trade", "貿易収支", "輸出入バランス"),
-    (r"Industrial Production", "鉱工業生産指数", "工場等の生産活動状況"),
-    (r"Machinery Orders", "機械受注", "企業の設備投資の先行指標"),
-    (r"Treasury.*Auction", "米財務省 国債入札", "長期金利への需給影響"),
+# 代表イベント分類・統合マッピング（正規表現, 統一イベント名, 注目ポイント, グループキー）
+EVENT_CONSOLIDATION_RULES = [
+    (r"Inflation Rate|Consumer Price|CPI", "米CPI (消費者物価指数)", "総合 ＆ コア物価上昇率 (前年比・前月比)", "CPI"),
+    (r"Fed Interest Rate|FOMC|Federal Funds", "FOMC 政策金利発表 ＆ 議長会見", "金利判断・ドットチャート・パウエル会見", "FOMC"),
+    (r"BoJ|Bank of Japan|Monetary Policy", "日銀 金融政策決定会合", "政策金利スタンス ＆ 植田総裁会見", "BOJ"),
+    (r"Non Farm|Nonfarm|Unemployment Rate|Average Hourly Earnings", "米雇用統計 (非農業部門/失業率)", "就業者数増減・失業率・平均時給", "NFP"),
+    (r"PCE Price|PCE Deflator", "米PCEデフレーター", "FRB最重視の個人消費支出物価指数", "PCE"),
+    (r"Tankan", "日銀短観", "大企業製造業DI・景況感 ＆ 設備投資", "TANKAN"),
+    (r"GDP Growth|GDP Price", "米実質GDP (国内総生産)", "四半期経済成長率 ＆ 改定値", "GDP"),
+    (r"Retail Sales", "米小売売上高", "個人消費の強さ ＆ コア売上", "RETAIL"),
+    (r"ISM Manufacturing", "米ISM製造業景況指数", "製造業マインドの景気分岐点(50)", "ISM_M"),
+    (r"ISM Services", "米ISM非製造業景況指数", "サービス業マインドの強さ", "ISM_S"),
 ]
 
-def translate_event_title(title):
-    for pattern, name_jp, point_jp in TRANSLATION_MAP:
+def classify_event(title):
+    for pattern, unified_name, point, group_key in EVENT_CONSOLIDATION_RULES:
         if re.search(pattern, title, re.IGNORECASE):
-            return name_jp, point_jp
+            return unified_name, point, group_key
+    return title, "主要経済指標発表", title
 
-    # 一般単語の安全な日本語置換
-    t = title
-    t = re.sub(r'(?i)\bYoY\b', '(前年比)', t)
-    t = re.sub(r'(?i)\bMoM\b', '(前月比)', t)
-    t = re.sub(r'(?i)\bQoQ\b', '(前期比)', t)
-    t = re.sub(r'(?i)\bCore\b', 'コア', t)
-    t = re.sub(r'(?i)\bRate\b', '率', t)
-    t = re.sub(r'(?i)\bIndex\b', '指数', t)
-    t = re.sub(r'(?i)\bDecision\b', '決定', t)
-    t = re.sub(r'(?i)\bReport\b', '報告', t)
-    return t, "主要経済指標発表"
-
-# TradingViewの公式APIから「重要度：大（★★★）」のみを1か月先まで動的取得
+# TradingViewの公式APIから1か月分の最重要マクロイベントを1本化して取得
 def fetch_tradingview_macro_calendar():
-    print("TradingView APIから向こう1か月分の最重要マクロイベントを取得中...")
+    print("TradingView APIから向こう1か月分の経済カレンダーを取得中...")
     jst = pytz.timezone('Asia/Tokyo')
     now_jst = datetime.now(jst)
     end_jst = now_jst + timedelta(days=32)
@@ -124,7 +74,7 @@ def fetch_tradingview_macro_calendar():
             data = res.json().get("result", [])
             for item in data:
                 importance = int(item.get("importance", 0))
-                # 重要度：大（★★★）のみに厳選
+                # 最重要イベント（★★★）のみ対象
                 if importance == 1:
                     title = item.get("title", "")
                     country = item.get("country", "")
@@ -134,33 +84,35 @@ def fetch_tradingview_macro_calendar():
                     dt_jst = dt_utc.astimezone(jst)
 
                     if now_jst <= dt_jst <= end_jst:
-                        name_jp, point_jp = translate_event_title(title)
+                        unified_name, point, group_key = classify_event(title)
                         country_display = "🇺🇸 米国" if country == "US" else "🇯🇵 日本"
 
                         events.append({
                             "datetime": dt_jst,
                             "country": country_display,
-                            "event": name_jp,
-                            "point": point_jp
+                            "event": unified_name,
+                            "point": point,
+                            "group_key": f"{country}_{dt_jst.strftime('%Y-%m-%d')}_{group_key}"
                         })
     except Exception as e:
         print(f"TradingView API取得エラー: {e}")
 
+    # 日時順にソート
     events.sort(key=lambda x: x["datetime"])
     
-    unique_events = []
-    seen = set()
+    # 同一日付・同一イベントグループの完全重複統合（1つに集約）
+    consolidated_events = []
+    seen_groups = set()
     for ev in events:
-        key = (ev["datetime"].strftime("%Y-%m-%d %H:%M"), ev["event"])
-        if key not in seen:
-            seen.add(key)
-            unique_events.append(ev)
+        if ev["group_key"] not in seen_groups:
+            seen_groups.add(ev["group_key"])
+            consolidated_events.append(ev)
 
-    if not unique_events:
+    if not consolidated_events:
         return "今後1か月以内に予定されている最重要イベント（★★★）はありません。"
 
     formatted = []
-    for ev in unique_events[:15]:
+    for ev in consolidated_events[:12]:
         dt = ev["datetime"]
         date_str = dt.strftime("%m/%d (%a) %H:%M").replace("Mon", "月").replace("Tue", "火").replace("Wed", "水").replace("Thu", "木").replace("Fri", "金").replace("Sat", "土").replace("Sun", "日")
         formatted.append({
