@@ -35,8 +35,6 @@ TRANSLATION_RULES = [
     (r"Tankan", "日銀短観", "大企業景況感・設備投資動向"),
     (r"GDP", "実質GDP (国内総生産)", "経済成長率・景気動向"),
     (r"Retail Sales", "米小売売上高", "個人消費の強さ"),
-    (r"PPI|Producer Price Index", "米PPI (生産者物価指数)", "企業物価動向"),
-    (r"ISM Manufacturing|ISM Services", "ISM景況感指数", "企業マインドの先行指標"),
 ]
 
 def translate_event_title(title):
@@ -45,9 +43,9 @@ def translate_event_title(title):
             return name_jp, point_jp
     return title, "主要経済指標"
 
-# TradingViewの公式APIから1か月先までの経済指標を動的に取得する関数
+# TradingViewの公式APIから「重要度：大（★★★）」のみを1か月先まで動的取得
 def fetch_tradingview_macro_calendar():
-    print("TradingView APIから向こう1か月分の経済カレンダーを取得中...")
+    print("TradingView APIから向こう1か月分の最重要マクロイベントを取得中...")
     jst = pytz.timezone('Asia/Tokyo')
     now_jst = datetime.now(jst)
     end_jst = now_jst + timedelta(days=32)
@@ -74,8 +72,8 @@ def fetch_tradingview_macro_calendar():
             data = res.json().get("result", [])
             for item in data:
                 importance = int(item.get("importance", 0))
-                # 重要度判定（1: 大, 0: 中）
-                if importance >= 0:
+                # 重要度：大（★★★）のみに厳選（importance == 1）
+                if importance == 1:
                     title = item.get("title", "")
                     country = item.get("country", "")
                     date_str = item.get("date", "")
@@ -86,18 +84,17 @@ def fetch_tradingview_macro_calendar():
                     if now_jst <= dt_jst <= end_jst:
                         name_jp, point_jp = translate_event_title(title)
                         country_display = "🇺🇸 米国" if country == "US" else "🇯🇵 日本"
-                        impact_display = "★★★ (大)" if importance >= 1 else "★★☆ (中)"
 
                         events.append({
                             "datetime": dt_jst,
                             "country": country_display,
                             "event": name_jp,
-                            "impact": impact_display,
                             "point": point_jp
                         })
     except Exception as e:
         print(f"TradingView API取得エラー: {e}")
 
+    # 日時順に並び替え & 重複整理
     events.sort(key=lambda x: x["datetime"])
     
     unique_events = []
@@ -109,17 +106,16 @@ def fetch_tradingview_macro_calendar():
             unique_events.append(ev)
 
     if not unique_events:
-        return "今後1か月以内に予定されている主要マクロイベントはありません。"
+        return "今後1か月以内に予定されている最重要イベント（★★★）はありません。"
 
     formatted = []
-    for ev in unique_events[:12]:
+    for ev in unique_events[:15]:
         dt = ev["datetime"]
         date_str = dt.strftime("%m/%d (%a) %H:%M").replace("Mon", "月").replace("Tue", "火").replace("Wed", "水").replace("Thu", "木").replace("Fri", "金").replace("Sat", "土").replace("Sun", "日")
         formatted.append({
             "日程 (日本時間)": date_str,
             "国 / 地域": ev["country"],
             "イベント / 経済指標": ev["event"],
-            "影響度": ev["impact"],
             "注目ポイント": ev["point"]
         })
 
@@ -376,7 +372,7 @@ def main():
 
 ---
 
-### ■ 3. 今後1か月の主要マクロイベントカレンダー (3段階重要度)
+### ■ 3. 今後1か月の主要マクロイベント (重要度 ★★★ のみ)
 {dynamic_calendar_table}
 """
     if len(report_text) > 1950:
