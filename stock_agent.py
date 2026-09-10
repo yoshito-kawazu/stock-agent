@@ -25,82 +25,87 @@ MACRO_DEFINITIONS = [
     {"name": "WTI原油先物", "symbols": ["CL=F"]},
 ]
 
-# 英語イベント名を日本語に自動翻訳・注目ポイント付与する辞書
-TRANSLATION_MAP = [
+# 英語イベント名を日本語に自動翻訳・注目ポイント付与するルール
+TRANSLATION_RULES = [
     (r"CPI|Consumer Price Index", "米CPI (消費者物価指数)", "インフレ動向・前年比"),
-    (r"Non-Farm|Employment Change|Unemployment Rate", "米雇用統計 (非農業部門/失業率)", "労働市場の減速ペース"),
-    (r"FOMC|Federal Funds Rate", "FOMC 政策金利発表 ＆ 議長会見", "利下げ/利上げ判断・ドットチャート"),
-    (r"BOJ|Monetary Policy Statement|Policy Rate", "日銀 金融政策決定会合", "追加利上げスタンス・総裁会見"),
-    (r"PCE|Core PCE", "米PCEデフレーター", "FRB重視の物価指標"),
+    (r"Nonfarm|Employment Situation|Unemployment Rate|Non-Farm", "米雇用統計 (非農業部門/失業率)", "労働市場の減速ペース"),
+    (r"Fed Interest Rate Decision|FOMC|Federal Funds", "FOMC 政策金利発表 ＆ 議長会見", "利下げ/利上げ判断・見通し"),
+    (r"BoJ|Bank of Japan Interest Rate|Monetary Policy", "日銀 金融政策決定会合", "追加利上げスタンス・総裁会見"),
+    (r"PCE Price Index|PCE Deflator", "米PCEデフレーター", "FRB重視の物価指標"),
     (r"Tankan", "日銀短観", "大企業景況感・設備投資動向"),
     (r"GDP", "実質GDP (国内総生産)", "経済成長率・景気動向"),
     (r"Retail Sales", "米小売売上高", "個人消費の強さ"),
     (r"PPI|Producer Price Index", "米PPI (生産者物価指数)", "企業物価動向"),
-    (r"ISM", "ISM製造業/非製造業景況指数", "企業マインドの先行指標"),
+    (r"ISM Manufacturing|ISM Services", "ISM景況感指数", "企業マインドの先行指標"),
 ]
 
-def translate_event(title):
-    for pattern, name_jp, point_jp in TRANSLATION_MAP:
+def translate_event_title(title):
+    for pattern, name_jp, point_jp in TRANSLATION_RULES:
         if re.search(pattern, title, re.IGNORECASE):
             return name_jp, point_jp
-    return title, "主要経済指標発表"
+    return title, "主要経済指標"
 
-# 外部ライブAPI（ForexFactory/FairEconomy）から動的にカレンダーを取得する関数
-def fetch_live_macro_calendar():
-    print("外部ライブ経済カレンダーAPIから動的取得中...")
+# TradingViewの公式APIから1か月先までの経済指標を動的に取得する関数
+def fetch_tradingview_macro_calendar():
+    print("TradingView APIから向こう1か月分の経済カレンダーを取得中...")
     jst = pytz.timezone('Asia/Tokyo')
     now_jst = datetime.now(jst)
-    end_date = now_jst + timedelta(days=32)
+    end_jst = now_jst + timedelta(days=32)
 
-    # 今週および来週以降の公式ライブJSONエンドポイント
-    endpoints = [
-        "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
-        "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
-    ]
+    url = "https://economic-calendar.tradingview.com/events"
+    headers = {
+        "Origin": "https://www.tradingview.com",
+        "User-Agent": "Mozilla/5.0"
+    }
 
-    all_events = []
-    headers = {"User-Agent": "Mozilla/5.0"}
+    # ISO 8601 UTC形式で1か月分の期間を指定
+    from_utc = now_jst.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+    to_utc = end_jst.astimezone(pytz.utc).strftime("%Y-%m-%dT%H:%M:%S.000Z")
 
-    for url in endpoints:
-        try:
-            res = requests.get(url, headers=headers, timeout=8)
-            if res.status_code == 200:
-                data = res.json()
-                for item in data:
-                    country = item.get("country", "")
-                    impact_raw = item.get("impact", "")
+    params = {
+        "from": from_utc,
+        "to": to_utc,
+        "countries": "US,JP"
+    }
+
+    events = []
+    try:
+        res = requests.get(url, headers=headers, params=params, timeout=10)
+        if res.status_code == 200:
+            data = res.json().get("result", [])
+            for item in data:
+                importance = item.get("importance", 0)
+                # 重要度が高いイベント（High: 1 または Medium: 0）を抽出
+                if importance in:
                     title = item.get("title", "")
-                    date_raw = item.get("date", "")
+                    country = item.get("country", "")
+                    date_str = item.get("date", "")
 
-                    # 日本株・為替に影響を与えるUSDおよびJPYの主要・中規模指標を抽出
-                    if country in ["USD", "JPY"] and impact_raw in ["High", "Medium"]:
-                        # ISO日時をJSTにパース
-                        dt = datetime.fromisoformat(date_raw)
-                        dt_jst = dt.astimezone(jst)
+                    # 日時パース
+                    dt_utc = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+                    dt_jst = dt_utc.astimezone(jst)
 
-                        if now_jst <= dt_jst <= end_date:
-                            impact_display = "★★★ (大)" if impact_raw == "High" else "★★☆ (中)"
-                            country_display = "🇺🇸 米国" if country == "USD" else "🇯🇵 日本"
-                            name_jp, point_jp = translate_event(title)
+                    if now_jst <= dt_jst <= end_jst:
+                        name_jp, point_jp = translate_event_title(title)
+                        country_display = "🇺🇸 米国" if country == "US" else "🇯🇵 日本"
+                        impact_display = "★★★ (大)" if importance == 1 else "★★☆ (中)"
 
-                            all_events.append({
-                                "datetime": dt_jst,
-                                "country": country_display,
-                                "event": name_jp,
-                                "impact": impact_display,
-                                "point": point_jp,
-                                "forecast": item.get("forecast", "-"),
-                                "previous": item.get("previous", "-")
-                            })
-        except Exception as e:
-            print(f"カレンダーAPI取得エラー ({url}): {e}")
+                        events.append({
+                            "datetime": dt_jst,
+                            "country": country_display,
+                            "event": name_jp,
+                            "impact": impact_display,
+                            "point": point_jp
+                        })
+    except Exception as e:
+        print(f"TradingView API取得エラー: {e}")
 
-    # 日時順に並び替え & 重複除外
-    all_events.sort(key=lambda x: x["datetime"])
+    # 日時順にソート & 重複整理
+    events.sort(key=lambda x: x["datetime"])
     
     unique_events = []
     seen = set()
-    for ev in all_events:
+    for ev in events:
         key = (ev["datetime"].strftime("%Y-%m-%d %H:%M"), ev["event"])
         if key not in seen:
             seen.add(key)
@@ -110,7 +115,8 @@ def fetch_live_macro_calendar():
         return "今後1か月以内に予定されている主要マクロイベントはありません。"
 
     formatted = []
-    for ev in unique_events:
+    # Discordの文字数制限に配慮して上位12件を抽出
+    for ev in unique_events[:12]:
         dt = ev["datetime"]
         date_str = dt.strftime("%m/%d (%a) %H:%M").replace("Mon", "月").replace("Tue", "火").replace("Wed", "水").replace("Thu", "木").replace("Fri", "金").replace("Sat", "土").replace("Sun", "日")
         formatted.append({
@@ -360,7 +366,7 @@ def main():
             files[f"files[{i}]"] = (os.path.basename(chart_path), open(chart_path, "rb"), "image/png")
 
     macro_table = fetch_macro()
-    dynamic_calendar_table = fetch_live_macro_calendar()
+    dynamic_calendar_table = fetch_tradingview_macro_calendar()
     stock_summary = "\n".join(stock_texts)
 
     report_text = f"""## 📅 【相場 ＆ テクニカル分析レポート】
