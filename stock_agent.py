@@ -3,7 +3,6 @@ import sys
 import json
 import re
 import unicodedata
-import calendar
 from datetime import datetime, timedelta
 import pytz
 import yfinance as yf
@@ -19,7 +18,6 @@ if not SPREADSHEET_ID or not DISCORD_WEBHOOK_URL:
     print("【エラー】SPREADSHEET_ID または DISCORD_WEBHOOK_URL が設定されていません。")
     sys.exit(1)
 
-# マクロ指標の定義（米国債ではなく、日経先物、ナスダック先物、ドル円、原油）
 MACRO_DEFINITIONS = [
     {"name": "日経平均先物 (大証/CME)", "symbols": ["NK=F", "NIY=F", "NKD=F", "^N225"]},
     {"name": "Nasdaq100先物 (CME)", "symbols": ["NQ=F", "^IXIC"]},
@@ -27,122 +25,95 @@ MACRO_DEFINITIONS = [
     {"name": "WTI原油先物", "symbols": ["CL=F"]},
 ]
 
-# 毎月の第N金曜日を算出する関数
-def get_nth_friday(year, month, n=1):
-    c = calendar.Calendar(firstweekday=calendar.MONDAY)
-    monthcal = c.monthdatescalendar(year, month)
-    fridays = [day for week in monthcal for day in week if day.weekday() == calendar.FRIDAY and day.month == month]
-    return fridays[n-1] if len(fridays) >= n else None
+# 英語イベント名を日本語に自動翻訳・注目ポイント付与する辞書
+TRANSLATION_MAP = [
+    (r"CPI|Consumer Price Index", "米CPI (消費者物価指数)", "インフレ動向・前年比"),
+    (r"Non-Farm|Employment Change|Unemployment Rate", "米雇用統計 (非農業部門/失業率)", "労働市場の減速ペース"),
+    (r"FOMC|Federal Funds Rate", "FOMC 政策金利発表 ＆ 議長会見", "利下げ/利上げ判断・ドットチャート"),
+    (r"BOJ|Monetary Policy Statement|Policy Rate", "日銀 金融政策決定会合", "追加利上げスタンス・総裁会見"),
+    (r"PCE|Core PCE", "米PCEデフレーター", "FRB重視の物価指標"),
+    (r"Tankan", "日銀短観", "大企業景況感・設備投資動向"),
+    (r"GDP", "実質GDP (国内総生産)", "経済成長率・景気動向"),
+    (r"Retail Sales", "米小売売上高", "個人消費の強さ"),
+    (r"PPI|Producer Price Index", "米PPI (生産者物価指数)", "企業物価動向"),
+    (r"ISM", "ISM製造業/非製造業景況指数", "企業マインドの先行指標"),
+]
 
-# 毎月の最終金曜日を算出する関数
-def get_last_friday(year, month):
-    c = calendar.Calendar(firstweekday=calendar.MONDAY)
-    monthcal = c.monthdatescalendar(year, month)
-    fridays = [day for week in monthcal for day in week if day.weekday() == calendar.FRIDAY and day.month == month]
-    return fridays[-1] if fridays else None
+def translate_event(title):
+    for pattern, name_jp, point_jp in TRANSLATION_MAP:
+        if re.search(pattern, title, re.IGNORECASE):
+            return name_jp, point_jp
+    return title, "主要経済指標発表"
 
-# 動的に今後1か月の主要イベントを自動生成するエンジン
-def generate_dynamic_calendar():
+# 外部ライブAPI（ForexFactory/FairEconomy）から動的にカレンダーを取得する関数
+def fetch_live_macro_calendar():
+    print("外部ライブ経済カレンダーAPIから動的取得中...")
     jst = pytz.timezone('Asia/Tokyo')
     now_jst = datetime.now(jst)
     end_date = now_jst + timedelta(days=32)
 
-    events = []
-    months_to_check = [
-        (now_jst.year, now_jst.month),
-        ((now_jst.year + 1 if now_jst.month == 12 else now_jst.year), (1 if now_jst.month == 12 else now_jst.month + 1))
+    # 今週および来週以降の公式ライブJSONエンドポイント
+    endpoints = [
+        "https://nfs.faireconomy.media/ff_calendar_thisweek.json",
+        "https://nfs.faireconomy.media/ff_calendar_nextweek.json"
     ]
 
-    for y, m in months_to_check:
-        # 1. 米雇用統計（第1金曜日 21:30）
-        fri1 = get_nth_friday(y, m, 1)
-        if fri1:
-            events.append({
-                "datetime": jst.localize(datetime(fri1.year, fri1.month, fri1.day, 21, 30)),
-                "country": "🇺🇸 米国",
-                "event": f"米{m-1 if m > 1 else 12}月 雇用統計",
-                "impact": "★★★ (大)",
-                "point": "非農業部門雇用者数 ＆ 失業率"
-            })
+    all_events = []
+    headers = {"User-Agent": "Mozilla/5.0"}
 
-        # 2. 米CPI（毎月中旬 12日前後の平日 21:30）
-        cpi_day = 12
-        while datetime(y, m, cpi_day).weekday() >= 5:
-            cpi_day += 1
-        events.append({
-            "datetime": jst.localize(datetime(y, m, cpi_day, 21, 30)),
-            "country": "🇺🇸 米国",
-            "event": f"米{m-1 if m > 1 else 12}月 CPI (消費者物価指数)",
-            "impact": "★★★ (大)",
-            "point": "インフレ動向・前年比"
-        })
+    for url in endpoints:
+        try:
+            res = requests.get(url, headers=headers, timeout=8)
+            if res.status_code == 200:
+                data = res.json()
+                for item in data:
+                    country = item.get("country", "")
+                    impact_raw = item.get("impact", "")
+                    title = item.get("title", "")
+                    date_raw = item.get("date", "")
 
-        # 3. 米PCEデフレーター（月末最終金曜日 21:30）
-        last_fri = get_last_friday(y, m)
-        if last_fri:
-            events.append({
-                "datetime": jst.localize(datetime(last_fri.year, last_fri.month, last_fri.day, 21, 30)),
-                "country": "🇺🇸 米国",
-                "event": f"米{m-1 if m > 1 else 12}月 PCEデフレーター",
-                "impact": "★★☆ (中)",
-                "point": "FRB重視の物価指標"
-            })
+                    # 日本株・為替に影響を与えるUSDおよびJPYの主要・中規模指標を抽出
+                    if country in ["USD", "JPY"] and impact_raw in ["High", "Medium"]:
+                        # ISO日時をJSTにパース
+                        dt = datetime.fromisoformat(date_raw)
+                        dt_jst = dt.astimezone(jst)
 
-        # 4. 日銀短観（4月, 7月, 10月, 12月の月初 08:50）
-        tankan_months = (4, 7, 10, 12)
-        if m in tankan_months:
-            tankan_day = 1
-            while datetime(y, m, tankan_day).weekday() >= 5:
-                tankan_day += 1
-            events.append({
-                "datetime": jst.localize(datetime(y, m, tankan_day, 8, 50)),
-                "country": "🇯🇵 日本",
-                "event": f"日銀短観 ({m}月調査)",
-                "impact": "★★☆ (中)",
-                "point": "大企業製造業DI・景況感"
-            })
+                        if now_jst <= dt_jst <= end_date:
+                            impact_display = "★★★ (大)" if impact_raw == "High" else "★★☆ (中)"
+                            country_display = "🇺🇸 米国" if country == "USD" else "🇯🇵 日本"
+                            name_jp, point_jp = translate_event(title)
 
-        # 5. FOMC 政策金利（1, 3, 5, 6, 7, 9, 11, 12月の中下旬 03:00）
-        fomc_months = (1, 3, 5, 6, 7, 9, 11, 12)
-        fomc_mid_months = (3, 6, 9, 12)
-        if m in fomc_months:
-            fomc_day = 18 if m in fomc_mid_months else 28
-            while datetime(y, m, fomc_day).weekday() >= 5:
-                fomc_day += 1
-            events.append({
-                "datetime": jst.localize(datetime(y, m, fomc_day, 3, 0)),
-                "country": "🇺🇸 米国",
-                "event": "FOMC 政策金利発表 ＆ 議長会見",
-                "impact": "★★★ (大)",
-                "point": "利下げ/利上げ判断 ＆ 経済見通し"
-            })
+                            all_events.append({
+                                "datetime": dt_jst,
+                                "country": country_display,
+                                "event": name_jp,
+                                "impact": impact_display,
+                                "point": point_jp,
+                                "forecast": item.get("forecast", "-"),
+                                "previous": item.get("previous", "-")
+                            })
+        except Exception as e:
+            print(f"カレンダーAPI取得エラー ({url}): {e}")
 
-        # 6. 日銀金融政策決定会合（1, 3, 4, 6, 7, 9, 10, 12月の中下旬 12:00）
-        boj_months = (1, 3, 4, 6, 7, 9, 10, 12)
-        boj_mid_months = (3, 6, 9, 12)
-        if m in boj_months:
-            boj_day = 19 if m in boj_mid_months else 29
-            while datetime(y, m, boj_day).weekday() >= 5:
-                boj_day += 1
-            events.append({
-                "datetime": jst.localize(datetime(y, m, boj_day, 12, 0)),
-                "country": "🇯🇵 日本",
-                "event": "日銀 金融政策決定会合",
-                "impact": "★★★ (大)",
-                "point": "追加利上げスタンス ＆ 総裁会見"
-            })
+    # 日時順に並び替え & 重複除外
+    all_events.sort(key=lambda x: x["datetime"])
+    
+    unique_events = []
+    seen = set()
+    for ev in all_events:
+        key = (ev["datetime"].strftime("%Y-%m-%d %H:%M"), ev["event"])
+        if key not in seen:
+            seen.add(key)
+            unique_events.append(ev)
 
-    active_events = [ev for ev in events if now_jst <= ev["datetime"] <= end_date]
-    active_events.sort(key=lambda x: x["datetime"])
+    if not unique_events:
+        return "今後1か月以内に予定されている主要マクロイベントはありません。"
 
-    if not active_events:
-        return "今後1か月以内に予定されている主要イベントはありません。"
-
-    res = []
-    for ev in active_events:
+    formatted = []
+    for ev in unique_events:
         dt = ev["datetime"]
         date_str = dt.strftime("%m/%d (%a) %H:%M").replace("Mon", "月").replace("Tue", "火").replace("Wed", "水").replace("Thu", "木").replace("Fri", "金").replace("Sat", "土").replace("Sun", "日")
-        res.append({
+        formatted.append({
             "日程 (日本時間)": date_str,
             "国 / 地域": ev["country"],
             "イベント / 経済指標": ev["event"],
@@ -150,7 +121,7 @@ def generate_dynamic_calendar():
             "注目ポイント": ev["point"]
         })
 
-    return pd.DataFrame(res).to_markdown(index=False)
+    return pd.DataFrame(formatted).to_markdown(index=False)
 
 def clean_and_format_ticker(raw_text):
     text = unicodedata.normalize('NFKC', str(raw_text)).strip()
@@ -306,10 +277,8 @@ def analyze_and_plot(ticker, idx):
 """
     return chart_path, text
 
-# 日本10年国債利回りを財務省・公的データから正確に取得する専用関数
 def fetch_jgb_10y_yield():
     try:
-        # 財務省の最新国債金利CSVを取得
         url = "https://www.mof.go.jp/jgbs/reference/interest_rate/jgbcm.csv"
         df = pd.read_csv(url, skiprows=1, encoding="shift-jis")
         if not df.empty and "10年" in df.columns:
@@ -328,7 +297,6 @@ def fetch_jgb_10y_yield():
     except Exception as e:
         print(f"JGB 10Y fetch error: {e}")
 
-    # フォールバック実勢推計（2.90%水準）
     return {
         "指標 / 先物": "日本10年国債利回り",
         "現在値": "2.895%",
@@ -374,7 +342,6 @@ def fetch_macro():
                 "当日高値": "-"
             })
 
-    # 日本10年国債利回りを末尾に追加
     jgb_data = fetch_jgb_10y_yield()
     res.append(jgb_data)
 
@@ -393,7 +360,7 @@ def main():
             files[f"files[{i}]"] = (os.path.basename(chart_path), open(chart_path, "rb"), "image/png")
 
     macro_table = fetch_macro()
-    dynamic_calendar_table = generate_dynamic_calendar()
+    dynamic_calendar_table = fetch_live_macro_calendar()
     stock_summary = "\n".join(stock_texts)
 
     report_text = f"""## 📅 【相場 ＆ テクニカル分析レポート】
