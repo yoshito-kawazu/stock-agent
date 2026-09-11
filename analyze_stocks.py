@@ -1,7 +1,12 @@
 import os
+import time  # 🚀 時間待機用に追加
 import requests
 from google import genai
 from google.genai import types
+from google.genai.errors import ServerError, ClientError  # 🚀 エラーハンドリング用に追加
+
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 # 1. 環境変数の取得
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
@@ -71,21 +76,37 @@ AI、半導体、フィジカルAI、ロボット、省人化、防衛、宇宙�
 """
 
 def generate_report():
-    print("レポート生成中（無料枠・モデル単体推論）...")
+    print("レポート生成中（最新のGemini 3.6 Flash & Web検索グラウンディング有効）...")
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # toolsパラメータを削除して純粋なテキスト生成として呼び出す
-    response = client.models.generate_content(
-        model='gemini-3.6-flash',
-        contents=ANALYSIS_PROMPT,
-        config=types.GenerateContentConfig(
-            temperature=0.2, # 分析精度向上のため低めに設定
-        )
-    )
-    return response.text
-
-
-
+    # 🚀 自動リトライ設定（最大5回、一時的な503 / 429に対処）
+    max_retries = 5
+    base_delay = 5  # 秒
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model='gemini-3.6-flash',
+                contents=ANALYSIS_PROMPT,
+                config=types.GenerateContentConfig(
+                    tools=[types.Tool(google_search=types.GoogleSearch())],
+                    temperature=0.2,
+                )
+            )
+            return response.text
+            
+        except (ServerError, ClientError) as e:
+            # 503 (Unavailable), 500 (Internal), または 429 (Resource Exhausted) の場合は時間をおいて再試行
+            is_transient = "503" in str(e) or "500" in str(e) or "429" in str(e)
+            
+            if is_transient and attempt < max_retries - 1:
+                delay = base_delay * (2 ** attempt)  # 5秒, 10秒, 20秒, 40秒と徐々に増やす
+                print(f"⚠️ 一時的なエラー（{e}）を検出しました。{delay}秒後に再試行します（試行 {attempt + 1}/{max_retries}）...")
+                time.sleep(delay)
+            else:
+                # 404など致命的なエラー、またはリトライ上限に達した場合はエラーを投げる
+                print("❌ 復旧不可能なエラーまたはリトライ上限に達しました。")
+                raise e
 
 def send_to_discord(report_text):
     print("Discordへレポート送信中...")
