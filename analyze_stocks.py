@@ -74,16 +74,17 @@ def generate_report():
     print("レポート生成中（Web検索グラウンディング有効）...")
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # Google検索ツールを有効化して最新決算・株価・一次情報URLを取得
+    # 最新のgemini-3.1-pro-previewとGoogle検索ツールを使用
     response = client.models.generate_content(
-        model='gemini-2.5-pro',
+        model='gemini-3.1-pro-preview', # 最新モデルにアップデート
         contents=ANALYSIS_PROMPT,
         config=types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())],
-            temperature=0.2, # 分析精度向上のため低めに設定
+            temperature=0.2, # 分析のブレを抑えるため低めに設定
         )
     )
     return response.text
+
 
 def send_to_discord(report_text):
     print("Discordへレポート送信中...")
