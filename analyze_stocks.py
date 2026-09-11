@@ -74,13 +74,13 @@ def generate_report():
     print("レポート生成中（Web検索グラウンディング有効）...")
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # 最新のgemini-3.1-pro-previewとGoogle検索ツールを使用
+    # 無料枠でGoogle検索ツールが動作する gemini-2.5-flash を指定
     response = client.models.generate_content(
-        model='gemini-3.1-pro-preview', # 最新モデルにアップデート
+        model='gemini-2.5-flash',  # 🚀 ここを変更
         contents=ANALYSIS_PROMPT,
         config=types.GenerateContentConfig(
             tools=[types.Tool(google_search=types.GoogleSearch())],
-            temperature=0.2, # 分析のブレを抑えるため低めに設定
+            temperature=0.2,
         )
     )
     return response.text
