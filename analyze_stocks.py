@@ -71,19 +71,19 @@ AI、半導体、フィジカルAI、ロボット、省人化、防衛、宇宙�
 """
 
 def generate_report():
-    print("レポート生成中（最新のGemini 3.6 Flash & Web検索グラウンディング有効）...")
+    print("レポート生成中（無料枠・モデル単体推論）...")
     client = genai.Client(api_key=GEMINI_API_KEY)
     
-    # エラーの指示通り、新規ユーザーも無料枠で使える gemini-3.6-flash にアップデート
+    # toolsパラメータを削除して純粋なテキスト生成として呼び出す
     response = client.models.generate_content(
-        model='gemini-3.6-flash',  # 🚀 最新世代の推奨Flashモデルへ変更
+        model='gemini-3.6-flash',
         contents=ANALYSIS_PROMPT,
         config=types.GenerateContentConfig(
-            tools=[types.Tool(google_search=types.GoogleSearch())],
             temperature=0.2, # 分析精度向上のため低めに設定
         )
     )
     return response.text
+
 
 
 
