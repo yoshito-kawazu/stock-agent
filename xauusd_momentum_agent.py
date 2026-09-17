@@ -20,34 +20,39 @@ def fetch_gold_momentum_data():
 
 def fetch_shanghai_premium():
     """
-    上海金（SGE AU9999）と国際スポット金（XAUUSD）を取得し、
-    中国現物プレミアム（$/oz）を算出する
+    上海金（SGE AU9999連動 518880.SS）と国際スポット金を取得し、
+    中国現物プレミアム（$/oz）を算出する（海外IPブロック対策版）
     """
     try:
-        # 1. 上海金 (SGE AU9999: 元/g) の最新価格を取得 (東方財富API)
-        eastmoney_url = "https://push2.eastmoney.com/api/qt/stock/get?secid=118.AU9999&fields=f43"
-        res = requests.get(eastmoney_url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10).json()
-        f43_val = res.get('data', {}).get('f43', 0)
-        
-        # 100倍表記の場合は100で割る
-        sge_cny_per_g = f43_val / 100.0 if f43_val > 5000 else float(f43_val)
+        # 1. 上海金ETF (518880.SS: 華安黄金ETF) から AU9999 (元/g) を算出
+        # ※ 1口 = 0.01g の純金現物（AU9999）に完全連動しているため、100倍で 1g あたりの元価格になる
+        sge_etf = yf.Ticker("518880.SS").history(period="5d")
+        if sge_etf.empty:
+            raise ValueError("518880.SS のデータが空です")
+        sge_etf_price = sge_etf['Close'].iloc[-1]
+        sge_cny_per_g = sge_etf_price * 100.0  # 元/g
         
         # 2. 為替レート (USD/CNY) を取得
-        usdcny = yf.Ticker("CNY=X").history(period="1d")['Close'].iloc[-1]
+        fx = yf.Ticker("USDCNY=X").history(period="5d")
+        usdcny = fx['Close'].iloc[-1]
         
-        # 3. 上海金をドル/トロイオンス ($/oz) に単位換算 (1 oz = 31.1034768 g)
+        # 3. 上海金をドル/トロイオンス ($/oz) に換算 (1 oz = 31.1034768 g)
         shanghai_gold_usd = (sge_cny_per_g * 31.1034768) / usdcny
         
-        # 4. 国際スポット金価格 (XAUUSD) を取得 (新浪财经 伦敦金 hf_XAU)
-        sina_url = "https://hq.sinajs.cn/list=hf_XAU"
-        sina_res = requests.get(sina_url, headers={"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}, timeout=10)
-        sina_text = sina_res.text
-        
-        if '="' in sina_text:
-            raw_data = sina_text.split('="').split('";')[0].split(',')
-            spot_gold_usd = float(raw_data[0])  # リアルタイムのスポット金価格 ($/oz)
-        else:
-            # 取得失敗時は COMEX 先物で代用
+        # 4. 国際スポット金価格 (XAUUSD) を取得
+        # まず新浪财经のロンドン金(hf_XAU)を試行し、ブロックされた場合は COMEX金先物で代用
+        spot_gold_usd = None
+        try:
+            sina_url = "https://hq.sinajs.cn/list=hf_XAU"
+            headers = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
+            res = requests.get(sina_url, headers=headers, timeout=5)
+            if '="' in res.text:
+                spot_gold_usd = float(res.text.split('="').split(',')[0])
+        except Exception:
+            pass
+            
+        if not spot_gold_usd or spot_gold_usd <= 0:
+            # バックアップ: COMEX先物 (GC=F) から現物近似値を採用
             spot_gold_usd = yf.Ticker("GC=F").history(period="1d")['Close'].iloc[-1]
             
         # 5. 上海プレミアム ($/oz) の算出
@@ -61,6 +66,7 @@ def fetch_shanghai_premium():
         else:
             sentiment = "⚠️【軟調】中国需要減退（上値重い）"
             
+        print(f"✅ 上海プレミアム算出成功: 上海=${shanghai_gold_usd:.2f}, 国際=${spot_gold_usd:.2f}, 差額={premium:+.2f}")
         return {
             "available": True,
             "sge_cny": sge_cny_per_g,
@@ -70,7 +76,7 @@ def fetch_shanghai_premium():
             "sentiment": sentiment
         }
     except Exception as e:
-        print(f"⚠️ 上海プレミアム取得スキップ (理由: {e})")
+        print(f"❌ 上海プレミアム取得エラー: {e}")
         return {"available": False}
 
 def generate_momentum_chart(df, output_path="momentum_chart.png"):
@@ -128,12 +134,13 @@ def send_to_discord(avg_range, recent_df, premium_data, chart_path="momentum_cha
         "━━━━━━━━━━━━━━━━━━"
     ]
     
-    # 上海プレミアムデータが正常に取れている場合は追記
     if premium_data.get("available"):
+        p_val = premium_data['premium']
+        p_str = f"+${p_val:.2f}" if p_val >= 0 else f"-${abs(p_val):.2f}"
         msg_lines.extend([
             f"🇨🇳 **上海金 (AU9999換算):** `${premium_data['shanghai_usd']:,.2f} /oz`",
             f"🌍 **国際スポット金 (XAUUSD):** `${premium_data['spot_usd']:,.2f} /oz`",
-            f"⚖️ **上海プレミアム:** `+${premium_data['premium']:.2f} /oz`" if premium_data['premium'] >= 0 else f"⚖️ **上海プレミアム:** `-${abs(premium_data['premium']):.2f} /oz`",
+            f"⚖️ **上海プレミアム:** `{p_str} /oz`",
             f"💡 **アジア時間需給判定:** {premium_data['sentiment']}",
             "━━━━━━━━━━━━━━━━━━"
         ])
