@@ -68,21 +68,18 @@ def generate_momentum_chart(df, output_path="momentum_chart.png"):
     return avg_range_5d, recent_df
 
 def send_to_discord(avg_range, recent_df, chart_path="momentum_chart.png"):
-    """Discordへ今日戦うための『値幅ファクト』だけを簡潔に投稿"""
+    """Discordへ今日使う『数値ファクト』のみを極限までシンプルに投稿"""
     latest = recent_df.iloc[-1]
     today_range = latest['Daily_Range']
     change = latest['Change']
     direction = "陽線 (上昇)" if change >= 0 else "陰線 (下落)"
     
-    # 現場での余計なアドバイスは全削除し、今日使う「物差し（ファクト）」だけに特化
+    # アドバイスやルール記述を一切排除し、100%数値ファクトのみを表示
     msg_content = f"""📊 **【XAUUSD 運動量＆ADRデータ】**
 ━━━━━━━━━━━━━━━━━━
-📏 **本日想定される平均値幅 (ADR):** `${avg_range:.2f}`
+📏 **本日想定される平均値幅 (ADR 5日平均):** `${avg_range:.2f}`
 🔥 **前日の値幅実績:** `${today_range:.2f}` （{direction}）
-━━━━━━━━━━━━━━━━━━
-💡 **実戦での物差し:**
-・本日これからの高安値幅が **${avg_range:.1f}** に到達、または近づいているか？
-（これに満たない段階での中途半端な逆張りエントリーは原則禁止！）"""
+━━━━━━━━━━━━━━━━━━"""
 
     payload = {"content": msg_content}
     
