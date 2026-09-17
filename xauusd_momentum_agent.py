@@ -1,0 +1,102 @@
+import os
+import datetime
+import requests
+import yfinance as yf
+import matplotlib.pyplot as plt
+import matplotlib.dates as mdates
+import pandas as pd
+
+DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
+
+def fetch_gold_data():
+    """金（XAU/USD現物およびCOMEX金先物）のデータを取得"""
+    # GC=F (金先物) または XAUUSD=X (スポット金)
+    gold = yf.Ticker("GC=F")
+    df = gold.history(period="1mo", interval="1d")
+    
+    # 運動量（1日の高値 - 安値のドル幅）を計算
+    df['Daily_Range'] = df['High'] - df['Low']
+    df['Change'] = df['Close'] - df['Open']
+    
+    return df
+
+def generate_momentum_chart(df, output_path="momentum_chart.png"):
+    """直近7営業日分の運動量を綺麗な縦棒グラフにプロット"""
+    recent_df = df.tail(7).copy()
+    avg_range_5d = df['Daily_Range'].tail(5).mean()
+    
+    plt.style.use('dark_background')
+    fig, ax = plt.subplots(figsize=(10, 5), dpi=150)
+    
+    # 棒グラフの色分け（陽線日はゴールド/緑、陰線日は赤/オレンジ）
+    colors = ['#FFD700' if c >= 0 else '#FF6347' for c in recent_df['Change']]
+    
+    bars = ax.bar(
+        recent_df.index.strftime('%m/%d (%a)'),
+        recent_df['Daily_Range'],
+        color=colors,
+        width=0.55,
+        edgecolor='white',
+        linewidth=0.8,
+        label='Daily Range ($)'
+    )
+    
+    # 5日平均運動量（ADR）の水平ラインを描画
+    ax.axhline(avg_range_5d, color='#00FFFF', linestyle='--', linewidth=1.5, 
+               label=f'5-Day Avg Range: ${avg_range_5d:.1f}')
+    
+    # 棒の上に数値を表示
+    for bar in bars:
+        yval = bar.get_height()
+        ax.text(bar.get_x() + bar.get_width()/2.0, yval + 0.8, f"${yval:.1f}", 
+                ha='center', va='bottom', fontsize=9, fontweight='bold', color='white')
+        
+    ax.set_title("XAUUSD 1-Week Momentum & Daily Range ($ High - Low)", fontsize=13, fontweight='bold', pad=15)
+    ax.set_ylabel("Price Range (USD / oz)", fontsize=10)
+    ax.grid(axis='y', linestyle=':', alpha=0.3)
+    ax.legend(loc='upper left')
+    
+    plt.tight_layout()
+    plt.savefig(output_path)
+    plt.close()
+    
+    return avg_range_5d, recent_df
+
+def send_to_discord(avg_range, recent_df, chart_path="momentum_chart.png"):
+    """Discordへ最新の金価格サマリーとグラフ画像を投稿"""
+    latest = recent_df.iloc[-1]
+    prev_close = latest['Close']
+    today_range = latest['Daily_Range']
+    
+    msg_content = f"""📊 **【XAUUSD デイリー運動量＆金価格レポート】**
+━━━━━━━━━━━━━━━━━━
+💰 **金基準価格 (直近終値):** `${prev_close:,.2f}`
+🔥 **直近の運動量 (1日値幅):** `${today_range:.2f}`
+📏 **直近5日平均値幅 (ADR):** `${avg_range:.2f}`
+💡 **環境認識メモ:**
+・本日の値幅が **${avg_range:.1f}** を超えている場合は、運動量消化による反転警戒！
+・TradingViewの「Structure Flip」と「200EMA乖離」を組み合わせてエントリーを狙いましょう。
+━━━━━━━━━━━━━━━━━━"""
+
+    payload = {"content": msg_content}
+    
+    with open(chart_path, "rb") as f:
+        files = {"file": (chart_path, f, "image/png")}
+        res = requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files)
+        
+    if res.status_code in [200, 204]:
+        print("✅ Discordへの画像・レポート送信に成功しました。")
+    else:
+        print(f"❌ エラー: {res.status_code}, {res.text}")
+
+def main():
+    if not DISCORD_WEBHOOK_URL:
+        print("❌ DISCORD_WEBHOOK_URL が設定されていません。")
+        return
+        
+    df = fetch_gold_data()
+    avg_range, recent_df = generate_momentum_chart(df)
+    send_to_discord(avg_range, recent_df)
+
+if __name__ == "__main__":
+    main()
