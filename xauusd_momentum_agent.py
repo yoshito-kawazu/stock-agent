@@ -3,16 +3,18 @@ import datetime
 import requests
 import yfinance as yf
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import pandas as pd
 
 DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 
 def fetch_gold_data():
-    """金（XAU/USD現物およびCOMEX金先物）のデータを取得"""
-    # GC=F (金先物) または XAUUSD=X (スポット金)
-    gold = yf.Ticker("XAUUSD=X")
+    """金（COMEX金先物 GC=F）のデータを取得（Yahoo Finance公式の安定ティッカー）"""
+    # XAUUSD=X はYahoo側で404になるため、最もデータが安定している GC=F を使用
+    gold = yf.Ticker("GC=F")
     df = gold.history(period="1mo", interval="1d")
+    
+    if df.empty:
+        raise ValueError("データの取得に失敗しました。Yahoo Financeのサーバーを確認してください。")
     
     # 運動量（1日の高値 - 安値のドル幅）を計算
     df['Daily_Range'] = df['High'] - df['Low']
@@ -31,8 +33,11 @@ def generate_momentum_chart(df, output_path="momentum_chart.png"):
     # 棒グラフの色分け（陽線日はゴールド/緑、陰線日は赤/オレンジ）
     colors = ['#FFD700' if c >= 0 else '#FF6347' for c in recent_df['Change']]
     
+    # 安全に日付フォーマットを変換
+    date_labels = pd.to_datetime(recent_df.index).strftime('%m/%d (%a)')
+    
     bars = ax.bar(
-        recent_df.index.strftime('%m/%d (%a)'),
+        date_labels,
         recent_df['Daily_Range'],
         color=colors,
         width=0.55,
@@ -70,12 +75,12 @@ def send_to_discord(avg_range, recent_df, chart_path="momentum_chart.png"):
     
     msg_content = f"""📊 **【XAUUSD デイリー運動量＆金価格レポート】**
 ━━━━━━━━━━━━━━━━━━
-💰 **金基準価格 (直近終値):** `${prev_close:,.2f}`
+💰 **金基準価格 (COMEX期近):** `${prev_close:,.2f}`
 🔥 **直近の運動量 (1日値幅):** `${today_range:.2f}`
 📏 **直近5日平均値幅 (ADR):** `${avg_range:.2f}`
 💡 **環境認識メモ:**
 ・本日の値幅が **${avg_range:.1f}** を超えている場合は、運動量消化による反転警戒！
-・TradingViewの「Structure Flip」と「200EMA乖離」を組み合わせてエントリーを狙いましょう。
+・TradingViewの「Structure Flip」と「200EMAボリバン乖離」を組み合わせてエントリーを狙いましょう。
 ━━━━━━━━━━━━━━━━━━"""
 
     payload = {"content": msg_content}
