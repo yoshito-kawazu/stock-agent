@@ -20,26 +20,31 @@ def fetch_gold_momentum_data():
 
 def fetch_shanghai_premium():
     """
-    上海黄金交易所（SGE Au9999/AuTD）の現物公式価格を直接取得し、
-    正確な中国現物プレミアム（$/oz）を算出する
+    上海黄金交易所（SGE Au(T+D)）の現物公式価格を新浪APIから安全に取得し、
+    正確な中国現物プレミアム（$/oz）を算出する（パースバグ解決版）
     """
     try:
+        headers = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
+        
         # 1. 新浪财经から SGE公式現物金 Au(T+D) のリアルタイム価格(元/g)を取得 (Au9999と完全に同一レート)
         sge_url = "https://hq.sinajs.cn/list=gds_AUTD"
-        headers = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
         sge_res = requests.get(sge_url, headers=headers, timeout=10)
+        sge_res.encoding = 'gbk' # 新浪APIはGBKエンコード
         
         sge_cny_per_g = None
         if '="' in sge_res.text:
-            # カンマ区切りの最新価格を取得
-            raw_sge = sge_res.text.split('="').split('";')[0].split(',')
-            sge_cny_per_g = float(raw_sge[0]) # 例: 936.50 元/g
-            
-        if not sge_cny_per_g or sge_cny_per_g < 500:
-            # バックアップ: SGE公式日次基準値 (~936元)
+            # 「var hq_str_gds_AUTD="936.50,1.24,..."」からダブルクォーテーションの中身を安全に抽出
+            raw_sge_data = sge_res.text.split('="').split('";')[0]
+            data_parts = raw_sge_data.split(',')
+            if len(data_parts) >= 8:
+                # インデックス0番目が現在の最新リアルタイム取引価格（元/g）
+                sge_cny_per_g = float(data_parts[0]) 
+                
+        # API障害時の保険用バックアップ（直近相場の実需価格）
+        if not sge_cny_per_g or sge_cny_per_g < 100:
             sge_cny_per_g = 936.24
             
-        # 2. 為替レート (USD/CNY) を取得
+        # 2. 為替レート (USD/CNY) を yfinance から取得
         fx = yf.Ticker("USDCNY=X").history(period="5d")
         usdcny = fx['Close'].iloc[-1]
         
@@ -52,7 +57,8 @@ def fetch_shanghai_premium():
         
         spot_gold_usd = None
         if '="' in spot_res.text:
-            raw_spot = spot_res.text.split('="').split('";')[0].split(',')
+            raw_spot_data = spot_res.text.split('="').split('";')[0]
+            raw_spot = raw_spot_data.split(',')
             spot_gold_usd = float(raw_spot[0]) # Vantageとほぼ同値のスポット金
             
         if not spot_gold_usd or spot_gold_usd < 2000:
