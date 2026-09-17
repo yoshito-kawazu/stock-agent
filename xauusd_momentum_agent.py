@@ -68,31 +68,28 @@ def generate_momentum_chart(df, output_path="momentum_chart.png"):
     return avg_range_5d, recent_df
 
 def send_to_discord(avg_range, recent_df, chart_path="momentum_chart.png"):
-    """Discordへ最新の金価格サマリーとグラフ画像を投稿"""
+    """Discordへ最新の運動量サマリーとグラフ画像を投稿"""
     latest = recent_df.iloc[-1]
-    prev_close = latest['Close']
     today_range = latest['Daily_Range']
+    change = latest['Change']
+    direction = "陽線 (上昇)" if change >= 0 else "陰線 (下落)"
     
-    msg_content = f"""📊 **【XAUUSD デイリー運動量＆金価格レポート】**
+    # 意味のない先物絶対価格を削除し、トレードに直結する情報だけに研ぎ澄ます
+    msg_content = f"""📊 **【XAUUSD 本日の運動量＆トレード指針】**
 ━━━━━━━━━━━━━━━━━━
-💰 **金基準価格 (COMEX期近):** `${prev_close:,.2f}`
-🔥 **直近の運動量 (1日値幅):** `${today_range:.2f}`
-📏 **直近5日平均値幅 (ADR):** `${avg_range:.2f}`
-💡 **環境認識メモ:**
-・本日の値幅が **${avg_range:.1f}** を超えている場合は、運動量消化による反転警戒！
-・TradingViewの「Structure Flip」と「200EMAボリバン乖離」を組み合わせてエントリーを狙いましょう。
-━━━━━━━━━━━━━━━━━━"""
+📏 **本日想定される平均値幅 (ADR):** `${avg_range:.2f}`
+🔥 **前日の値幅実績:** `${today_range:.2f}` （{direction}）
+━━━━━━━━━━━━━━━━━━
+🎯 **本日の立ち回りルール:**
+① 朝の高安から値幅が **${avg_range:.1f}** に達したら「運動量の限界（急反転）」を警戒！
+② TradingViewで **200EMAボリバン（±2σ外側）** への到達を確認。
+③ **Structure Flip Base (v2)** の転換シグナルが点灯した瞬間にMT5で成行エントリー！"""
 
     payload = {"content": msg_content}
     
     with open(chart_path, "rb") as f:
         files = {"file": (chart_path, f, "image/png")}
         res = requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files)
-        
-    if res.status_code in [200, 204]:
-        print("✅ Discordへの画像・レポート送信に成功しました。")
-    else:
-        print(f"❌ エラー: {res.status_code}, {res.text}")
 
 def main():
     if not DISCORD_WEBHOOK_URL:
