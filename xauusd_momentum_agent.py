@@ -68,28 +68,32 @@ def generate_momentum_chart(df, output_path="momentum_chart.png"):
     return avg_range_5d, recent_df
 
 def send_to_discord(avg_range, recent_df, chart_path="momentum_chart.png"):
-    """Discordへ最新の運動量サマリーとグラフ画像を投稿"""
+    """Discordへ今日戦うための『値幅ファクト』だけを簡潔に投稿"""
     latest = recent_df.iloc[-1]
     today_range = latest['Daily_Range']
     change = latest['Change']
     direction = "陽線 (上昇)" if change >= 0 else "陰線 (下落)"
     
-    # 意味のない先物絶対価格を削除し、トレードに直結する情報だけに研ぎ澄ます
-    msg_content = f"""📊 **【XAUUSD 本日の運動量＆トレード指針】**
+    # 現場での余計なアドバイスは全削除し、今日使う「物差し（ファクト）」だけに特化
+    msg_content = f"""📊 **【XAUUSD 運動量＆ADRデータ】**
 ━━━━━━━━━━━━━━━━━━
 📏 **本日想定される平均値幅 (ADR):** `${avg_range:.2f}`
 🔥 **前日の値幅実績:** `${today_range:.2f}` （{direction}）
 ━━━━━━━━━━━━━━━━━━
-🎯 **本日の立ち回りルール:**
-① 朝の高安から値幅が **${avg_range:.1f}** に達したら「運動量の限界（急反転）」を警戒！
-② TradingViewで **200EMAボリバン（±2σ外側）** への到達を確認。
-③ **Structure Flip Base (v2)** の転換シグナルが点灯した瞬間にMT5で成行エントリー！"""
+💡 **実戦での物差し:**
+・本日これからの高安値幅が **${avg_range:.1f}** に到達、または近づいているか？
+（これに満たない段階での中途半端な逆張りエントリーは原則禁止！）"""
 
     payload = {"content": msg_content}
     
     with open(chart_path, "rb") as f:
         files = {"file": (chart_path, f, "image/png")}
         res = requests.post(DISCORD_WEBHOOK_URL, data=payload, files=files)
+        
+    if res.status_code in [200, 204]:
+        print("✅ Discordへの画像・レポート送信に成功しました。")
+    else:
+        print(f"❌ エラー: {res.status_code}, {res.text}")
 
 def main():
     if not DISCORD_WEBHOOK_URL:
