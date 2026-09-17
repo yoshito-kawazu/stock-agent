@@ -2,8 +2,8 @@ name: Hourly Stock Agent
 
 on:
   schedule:
-    # 平日（月〜金）の日本時間 9:00〜15:00（UTC 0:00〜6:00）の毎時0分に自動実行
-    - cron: '0 0-6 * * 1-5'
+    # 平日（月〜金）の日本時間 12:00（UTC 3:00）に1回のみ自動実行
+    - cron: '0 3 * * 1-5'
   workflow_dispatch: # 手動実行用ボタン（いつでも手動テスト可能）
 
 jobs:
