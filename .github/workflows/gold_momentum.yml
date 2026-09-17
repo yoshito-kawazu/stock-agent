@@ -2,8 +2,8 @@ name: XAUUSD Daily Momentum Report
 
 on:
   schedule:
-    # 毎週月曜〜金曜の日本時間 朝7:00（22:00 UTC）に自動実行
-    - cron: '0 22 * * 0-4'
+    # 平日（月〜金）の日本時間 12:00（UTC 3:00）に1回のみ自動実行
+    - cron: '0 3 * * 1-5'
   workflow_dispatch: # 手動実行ボタンも設置
 
 jobs:
