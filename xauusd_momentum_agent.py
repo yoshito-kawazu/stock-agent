@@ -11,7 +11,7 @@ DISCORD_WEBHOOK_URL = os.environ.get("DISCORD_WEBHOOK_URL")
 def fetch_gold_data():
     """金（XAU/USD現物およびCOMEX金先物）のデータを取得"""
     # GC=F (金先物) または XAUUSD=X (スポット金)
-    gold = yf.Ticker("GC=F")
+    gold = yf.Ticker("XAUUSD=X")
     df = gold.history(period="1mo", interval="1d")
     
     # 運動量（1日の高値 - 安値のドル幅）を計算
