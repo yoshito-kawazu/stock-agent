@@ -20,7 +20,11 @@ def fetch_gold_momentum_data():
 
 def fetch_macro_market_data():
     """
-    WTI原油先物（CL=F）と米国10年債利回り（^TNX）を取得
+    マクロ4大重要指標の最新データを一括取得
+    - WTI原油先物 (CL=F)
+    - 米国10年債利回り (^TNX)
+    - ドルインデックス (DX-Y.NYB)
+    - 米国2年債利回り (^2YR)
     """
     macro_data = {}
     
@@ -57,6 +61,40 @@ def fetch_macro_market_data():
     except Exception as e:
         print(f"⚠️ 米10年債利回り取得エラー: {e}")
         macro_data['tnx'] = {"available": False}
+        
+    # 3. ドルインデックス (DX-Y.NYB)
+    try:
+        dxy = yf.Ticker("DX-Y.NYB").history(period="5d")
+        if not dxy.empty:
+            dxy_val = dxy['Close'].iloc[-1]
+            dxy_prev = dxy['Close'].iloc[-2] if len(dxy) >= 2 else dxy_val
+            dxy_change = dxy_val - dxy_prev
+            dxy_pct = (dxy_change / dxy_prev) * 100 if dxy_prev else 0
+            macro_data['dxy'] = {
+                "available": True,
+                "price": dxy_val,
+                "change": dxy_change,
+                "pct": dxy_pct
+            }
+    except Exception as e:
+        print(f"⚠️ ドルインデックス取得エラー: {e}")
+        macro_data['dxy'] = {"available": False}
+        
+    # 4. 米国2年債利回り (^2YR)
+    try:
+        us02y = yf.Ticker("^2YR").history(period="5d")
+        if not us02y.empty:
+            us02y_yield = us02y['Close'].iloc[-1]
+            us02y_prev = us02y['Close'].iloc[-2] if len(us02y) >= 2 else us02y_yield
+            us02y_change = us02y_yield - us02y_prev
+            macro_data['us02y'] = {
+                "available": True,
+                "yield": us02y_yield,
+                "change": us02y_change
+            }
+    except Exception as e:
+        print(f"⚠️ 米2年債利回り取得エラー: {e}")
+        macro_data['us02y'] = {"available": False}
         
     return macro_data
 
@@ -101,31 +139,43 @@ def generate_momentum_chart(df, output_path="momentum_chart.png"):
     return avg_range_5d, recent_df
 
 def send_to_discord(avg_range, recent_df, macro_data, chart_path="momentum_chart.png"):
-    """Discordへ運動量データ、原油、米10年債利回り、グラフ画像を投稿"""
+    """Discordへ運動量データ、マクロ4大指標、グラフ画像を投稿"""
     latest = recent_df.iloc[-1]
     today_range = latest['Daily_Range']
     change = latest['Change']
     direction = "陽線 (上昇)" if change >= 0 else "陰線 (下落)"
     
     msg_lines = [
-        "📊 **【XAUUSD 運動量＆マクロ指標データ】**",
+        "📊 **【XAUUSD 運動量＆マクロ4大重要指標】**",
         "━━━━━━━━━━━━━━━━━━",
         f"📏 **本日想定される平均値幅 (ADR 5日平均):** `${avg_range:.2f}`",
         f"🔥 **前日の値幅実績:** `${today_range:.2f}` （{direction}）",
         "━━━━━━━━━━━━━━━━━━"
     ]
     
-    # 🛢️ WTI原油先物
-    oil_info = macro_data.get('oil', {})
-    if oil_info.get('available'):
-        sign = "+" if oil_info['change'] >= 0 else ""
-        msg_lines.append(f"🛢️ **WTI原油先物:** `${oil_info['price']:.2f}` ({sign}{oil_info['change']:.2f} / {sign}{oil_info['pct']:.2f}%)")
+    # 💵 ① ドルインデックス (DXY)
+    dxy_info = macro_data.get('dxy', {})
+    if dxy_info.get('available'):
+        sign = "+" if dxy_info['change'] >= 0 else ""
+        msg_lines.append(f"💵 **ドルインデックス (DXY):** `{dxy_info['price']:.2f}` ({sign}{dxy_info['change']:.2f} / {sign}{dxy_info['pct']:.2f}%)")
         
-    # 🇺🇸 米国10年債利回り
+    # 🇺🇸 ② 米国10年債利回り (US10Y)
     tnx_info = macro_data.get('tnx', {})
     if tnx_info.get('available'):
         sign = "+" if tnx_info['change'] >= 0 else ""
         msg_lines.append(f"🇺🇸 **米10年債利回り:** `{tnx_info['yield']:.3f}%` ({sign}{tnx_info['change']:.3f}%p)")
+        
+    # 🇺🇸 ③ 米国2年債利回り (US02Y)
+    us02y_info = macro_data.get('us02y', {})
+    if us02y_info.get('available'):
+        sign = "+" if us02y_info['change'] >= 0 else ""
+        msg_lines.append(f"🇺🇸 **米2年債利回り:** `{us02y_info['yield']:.3f}%` ({sign}{us02y_info['change']:.3f}%p)")
+        
+    # 🛢️ ④ WTI原油先物 (OIL)
+    oil_info = macro_data.get('oil', {})
+    if oil_info.get('available'):
+        sign = "+" if oil_info['change'] >= 0 else ""
+        msg_lines.append(f"🛢️ **WTI原油先物:** `${oil_info['price']:.2f}` ({sign}{oil_info['change']:.2f} / {sign}{oil_info['pct']:.2f}%)")
         
     msg_lines.append("━━━━━━━━━━━━━━━━━━")
     
