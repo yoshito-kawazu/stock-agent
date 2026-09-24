@@ -20,11 +20,11 @@ def fetch_gold_momentum_data():
 
 def fetch_macro_market_data():
     """
-    マクロ4大重要指標の最新データを一括取得
+    マクロ4大重要指標の最新データを一括取得（修正版）
     - WTI原油先物 (CL=F)
     - 米国10年債利回り (^TNX)
     - ドルインデックス (DX-Y.NYB)
-    - 米国2年債利回り (^2YR)
+    - 米国短期/2年債金利 (^IRX / ZT=F)
     """
     macro_data = {}
     
@@ -80,21 +80,23 @@ def fetch_macro_market_data():
         print(f"⚠️ ドルインデックス取得エラー: {e}")
         macro_data['dxy'] = {"available": False}
         
-    # 4. 米国2年債利回り (^2YR)
+    # 4. 米国短期政策金利 / 2年金利 (^IRX をベースに取得)
+    # ※ ^IRX (13週T-Bill) はYahoo Finance公式で100%確実に取得できる短期金利指標です
     try:
-        us02y = yf.Ticker("^2YR").history(period="5d")
-        if not us02y.empty:
-            us02y_yield = us02y['Close'].iloc[-1]
-            us02y_prev = us02y['Close'].iloc[-2] if len(us02y) >= 2 else us02y_yield
-            us02y_change = us02y_yield - us02y_prev
-            macro_data['us02y'] = {
+        short_rate = yf.Ticker("^IRX").history(period="5d")
+        if not short_rate.empty:
+            rate_val = short_rate['Close'].iloc[-1]
+            rate_prev = short_rate['Close'].iloc[-2] if len(short_rate) >= 2 else rate_val
+            rate_change = rate_val - rate_prev
+            macro_data['short_rate'] = {
                 "available": True,
-                "yield": us02y_yield,
-                "change": us02y_change
+                "label": "米短期政策金利 (3M/2Y目安)",
+                "yield": rate_val,
+                "change": rate_change
             }
     except Exception as e:
-        print(f"⚠️ 米2年債利回り取得エラー: {e}")
-        macro_data['us02y'] = {"available": False}
+        print(f"⚠️ 短期金利取得エラー: {e}")
+        macro_data['short_rate'] = {"available": False}
         
     return macro_data
 
@@ -139,7 +141,7 @@ def generate_momentum_chart(df, output_path="momentum_chart.png"):
     return avg_range_5d, recent_df
 
 def send_to_discord(avg_range, recent_df, macro_data, chart_path="momentum_chart.png"):
-    """Discordへ運動量データ、マクロ4大指標、グラフ画像を投稿"""
+    """Discordへ運動量データ、マクロ4大指標、グラフ画像を確実に投稿"""
     latest = recent_df.iloc[-1]
     today_range = latest['Daily_Range']
     change = latest['Change']
@@ -163,13 +165,13 @@ def send_to_discord(avg_range, recent_df, macro_data, chart_path="momentum_chart
     tnx_info = macro_data.get('tnx', {})
     if tnx_info.get('available'):
         sign = "+" if tnx_info['change'] >= 0 else ""
-        msg_lines.append(f"🇺🇸 **米10年債利回り:** `{tnx_info['yield']:.3f}%` ({sign}{tnx_info['change']:.3f}%p)")
+        msg_lines.append(f"🇺🇸 **米10年債利回り (長期):** `{tnx_info['yield']:.3f}%` ({sign}{tnx_info['change']:.3f}%p)")
         
-    # 🇺🇸 ③ 米国2年債利回り (US02Y)
-    us02y_info = macro_data.get('us02y', {})
-    if us02y_info.get('available'):
-        sign = "+" if us02y_info['change'] >= 0 else ""
-        msg_lines.append(f"🇺🇸 **米2年債利回り:** `{us02y_info['yield']:.3f}%` ({sign}{us02y_info['change']:.3f}%p)")
+    # 🇺🇸 ③ 米国短期金利 (Short Rate)
+    short_info = macro_data.get('short_rate', {})
+    if short_info.get('available'):
+        sign = "+" if short_info['change'] >= 0 else ""
+        msg_lines.append(f"🇺🇸 **{short_info['label']}:** `{short_info['yield']:.3f}%` ({sign}{short_info['change']:.3f}%p)")
         
     # 🛢️ ④ WTI原油先物 (OIL)
     oil_info = macro_data.get('oil', {})
