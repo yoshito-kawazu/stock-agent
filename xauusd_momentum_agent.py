@@ -18,84 +18,47 @@ def fetch_gold_momentum_data():
     df['Change'] = df['Close'] - df['Open']
     return df
 
-def fetch_shanghai_premium():
+def fetch_macro_market_data():
     """
-    上海金（SGE Au9999/AuTD）と国際スポット金のリアルタイム価格を取得し、
-    中国現物プレミアム（$/oz）を算出する（完全エラー根絶版）
+    WTI原油先物（CL=F）と米国10年債利回り（^TNX）を取得
     """
-    # 1. 為替レート (USD/CNY) の取得
+    macro_data = {}
+    
+    # 1. WTI原油先物 (CL=F)
     try:
-        fx = yf.Ticker("USDCNY=X").history(period="5d")
-        usdcny = float(fx['Close'].iloc[-1])
-    except Exception:
-        usdcny = 7.02 # フォールバックレート
-        
-    # 2. 上海金 (SGE Au(T+D)) の価格(元/g)を取得
-    sge_cny_per_g = None
-    try:
-        sge_url = "https://hq.sinajs.cn/list=gds_AUTD"
-        headers = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
-        sge_res = requests.get(sge_url, headers=headers, timeout=5)
-        sge_res.encoding = 'gbk'
-        
-        if '="' in sge_res.text:
-            # 正しいインデックス [1] で中身を抽出
-            raw_sge_data = sge_res.text.split('="')[1].split('";')[0]
-            data_parts = raw_sge_data.split(',')
-            if len(data_parts) >= 1 and float(data_parts[0]) > 500:
-                sge_cny_per_g = float(data_parts[0])
+        oil = yf.Ticker("CL=F").history(period="5d")
+        if not oil.empty:
+            oil_price = oil['Close'].iloc[-1]
+            oil_prev = oil['Close'].iloc[-2] if len(oil) >= 2 else oil_price
+            oil_change = oil_price - oil_prev
+            oil_pct = (oil_change / oil_prev) * 100 if oil_prev else 0
+            macro_data['oil'] = {
+                "available": True,
+                "price": oil_price,
+                "change": oil_change,
+                "pct": oil_pct
+            }
     except Exception as e:
-        print(f"⚠️ SGEリアルタイム取得フォールバック: {e}")
+        print(f"⚠️ 原油先物取得エラー: {e}")
+        macro_data['oil'] = {"available": False}
         
-    if not sge_cny_per_g:
-        sge_cny_per_g = 936.24 # SGE公式公表の直近基準価格
-        
-    # 3. 上海金を ドル/トロイオンス ($/oz) に換算 (1 oz = 31.1034768 g)
-    shanghai_gold_usd = (sge_cny_per_g * 31.1034768) / usdcny
-    
-    # 4. 国際スポット金価格 (XAUUSD) の取得
-    spot_gold_usd = None
+    # 2. 米国10年債利回り (^TNX)
     try:
-        spot_url = "https://hq.sinajs.cn/list=hf_XAU"
-        headers = {"Referer": "https://finance.sina.com.cn", "User-Agent": "Mozilla/5.0"}
-        spot_res = requests.get(spot_url, headers=headers, timeout=5)
-        
-        if '="' in spot_res.text:
-            raw_spot_data = spot_res.text.split('="')[1].split('";')[0]
-            raw_spot = raw_spot_data.split(',')
-            if len(raw_spot) >= 1 and float(raw_spot[0]) > 2000:
-                spot_gold_usd = float(raw_spot[0])
+        tnx = yf.Ticker("^TNX").history(period="5d")
+        if not tnx.empty:
+            tnx_yield = tnx['Close'].iloc[-1]
+            tnx_prev = tnx['Close'].iloc[-2] if len(tnx) >= 2 else tnx_yield
+            tnx_change = tnx_yield - tnx_prev
+            macro_data['tnx'] = {
+                "available": True,
+                "yield": tnx_yield,
+                "change": tnx_change
+            }
     except Exception as e:
-        print(f"⚠️ スポット金取得フォールバック: {e}")
+        print(f"⚠️ 米10年債利回り取得エラー: {e}")
+        macro_data['tnx'] = {"available": False}
         
-    if not spot_gold_usd:
-        try:
-            comex = yf.Ticker("GC=F").history(period="1d")['Close'].iloc[-1]
-            spot_gold_usd = float(comex) - 93.45 # 先物のコンタンゴを差し引いて現物スポットに補正
-        except Exception:
-            spot_gold_usd = 4293.55
-            
-    # 5. 正確な上海プレミアム ($/oz) の算出
-    premium = shanghai_gold_usd - spot_gold_usd
-    
-    # 6. アジア時間の地合い判定
-    if premium >= 15.0:
-        sentiment = "🔥【超強気】中国現物買い殺到（アジア時間ロング主体推奨）"
-    elif premium > 0.0:
-        sentiment = "📈【底堅い】中国現物プレミアム買い優勢"
-    else:
-        sentiment = "⚠️【軟調】中国需要減退（上値重い）"
-        
-    print(f"✅ 上海プレミアム算出完了: 上海=${shanghai_gold_usd:.2f}, スポット=${spot_gold_usd:.2f}, 差額={premium:+.2f}")
-    
-    return {
-        "available": True,
-        "sge_cny": sge_cny_per_g,
-        "shanghai_usd": shanghai_gold_usd,
-        "spot_usd": spot_gold_usd,
-        "premium": premium,
-        "sentiment": sentiment
-    }
+    return macro_data
 
 def generate_momentum_chart(df, output_path="momentum_chart.png"):
     """直近7営業日分の運動量を綺麗な縦棒グラフにプロット"""
@@ -137,28 +100,34 @@ def generate_momentum_chart(df, output_path="momentum_chart.png"):
     
     return avg_range_5d, recent_df
 
-def send_to_discord(avg_range, recent_df, premium_data, chart_path="momentum_chart.png"):
-    """Discordへ運動量データ、上海プレミアム、グラフ画像を確実に投稿"""
+def send_to_discord(avg_range, recent_df, macro_data, chart_path="momentum_chart.png"):
+    """Discordへ運動量データ、原油、米10年債利回り、グラフ画像を投稿"""
     latest = recent_df.iloc[-1]
     today_range = latest['Daily_Range']
     change = latest['Change']
     direction = "陽線 (上昇)" if change >= 0 else "陰線 (下落)"
     
-    p_val = premium_data['premium']
-    p_str = f"+${p_val:.2f}" if p_val >= 0 else f"-${abs(p_val):.2f}"
-    
     msg_lines = [
-        "📊 **【XAUUSD 運動量＆中国現物プレミアム】**",
+        "📊 **【XAUUSD 運動量＆マクロ指標データ】**",
         "━━━━━━━━━━━━━━━━━━",
         f"📏 **本日想定される平均値幅 (ADR 5日平均):** `${avg_range:.2f}`",
         f"🔥 **前日の値幅実績:** `${today_range:.2f}` （{direction}）",
-        "━━━━━━━━━━━━━━━━━━",
-        f"🇨🇳 **上海金 (AU9999換算):** `${premium_data['shanghai_usd']:,.2f} /oz`",
-        f"🌍 **国際スポット金 (XAUUSD):** `${premium_data['spot_usd']:,.2f} /oz`",
-        f"⚖️ **上海プレミアム:** `{p_str} /oz`",
-        f"💡 **アジア時間需給判定:** {premium_data['sentiment']}",
         "━━━━━━━━━━━━━━━━━━"
     ]
+    
+    # 🛢️ WTI原油先物
+    oil_info = macro_data.get('oil', {})
+    if oil_info.get('available'):
+        sign = "+" if oil_info['change'] >= 0 else ""
+        msg_lines.append(f"🛢️ **WTI原油先物:** `${oil_info['price']:.2f}` ({sign}{oil_info['change']:.2f} / {sign}{oil_info['pct']:.2f}%)")
+        
+    # 🇺🇸 米国10年債利回り
+    tnx_info = macro_data.get('tnx', {})
+    if tnx_info.get('available'):
+        sign = "+" if tnx_info['change'] >= 0 else ""
+        msg_lines.append(f"🇺🇸 **米10年債利回り:** `{tnx_info['yield']:.3f}%` ({sign}{tnx_info['change']:.3f}%p)")
+        
+    msg_lines.append("━━━━━━━━━━━━━━━━━━")
     
     msg_content = "\n".join(msg_lines)
     payload = {"content": msg_content}
@@ -179,8 +148,8 @@ def main():
         
     df = fetch_gold_momentum_data()
     avg_range, recent_df = generate_momentum_chart(df)
-    premium_data = fetch_shanghai_premium()
-    send_to_discord(avg_range, recent_df, premium_data)
+    macro_data = fetch_macro_market_data()
+    send_to_discord(avg_range, recent_df, macro_data)
 
 if __name__ == "__main__":
     main()
